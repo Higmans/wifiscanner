@@ -4,11 +4,14 @@ import android.app.Application
 
 class WiFiScannerApplication : Application() {
 
-    val botApiKey: String
+    private val botApiKey: String
         get() = BuildConfig.BOT_API_KEY
 
-    val botChatId: Long
+    private val botChatId: Long
         get() = BuildConfig.CHAT_ID.toLong()
+
+    val bot: Bot by lazy { Bot(botApiKey, botChatId) }
+    val scanner: Scanner by lazy { Scanner(this) }
 
     override fun onCreate() {
         super.onCreate()
@@ -16,7 +19,7 @@ class WiFiScannerApplication : Application() {
     }
 
     companion object {
-        var instance: WiFiScannerApplication? = null
+        lateinit var instance: WiFiScannerApplication
             private set
     }
 }

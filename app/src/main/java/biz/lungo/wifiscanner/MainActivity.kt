@@ -13,15 +13,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.DividerItemDecoration
 import biz.lungo.wifiscanner.databinding.ActivityMainBinding
 import com.google.android.material.snackbar.Snackbar
-import nl.mirrajabi.humanize.duration.DurationHumanizer
-import retrofit2.Retrofit
-import retrofit2.converter.scalars.ScalarsConverterFactory
 import java.time.LocalDateTime
-import java.time.ZoneId
-import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
-import java.time.temporal.ChronoUnit
 
 class MainActivity : AppCompatActivity(),
     Scanner.OnStateChangedListener,
@@ -29,29 +23,20 @@ class MainActivity : AppCompatActivity(),
     View.OnClickListener {
 
     private lateinit var binding: ActivityMainBinding
-    private lateinit var storage: Storage
-    private lateinit var webhookApiService: WebhookApi
-    private lateinit var scanService: Scanner
     private lateinit var availableAdapter: WiFiAdapter
     private lateinit var trackedAdapter: WiFiTrackedAdapter
-    private val bot = Bot(WiFiScannerApplication.instance?.botApiKey, WiFiScannerApplication.instance?.botChatId)
-    private val humanizer = DurationHumanizer()
-    private val languages = mapOf("ukr" to UkrainianDictionary())
-    private val humanizerOptions = DurationHumanizer.Options(language = "Ukrainian", delimiter = "", languages = languages, fallbacks = listOf("ukr"))
-    private val retrofit = Retrofit.Builder()
-        .baseUrl("https://maker.ifttt.com/trigger/HasWifi/json/with/key/")
-        .addConverterFactory(ScalarsConverterFactory.create())
-        .build()
+    private val storage by lazy { Storage(this) }
+    private val scanner: Scanner
+        get() = WiFiScannerApplication.instance.scanner
+    private val bot: Bot
+        get() = WiFiScannerApplication.instance.bot
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
-        storage = Storage(this)
-        webhookApiService = retrofit.create(WebhookApi::class.java)
-        scanService = Scanner(applicationContext)
-        scanService.subscribe(this)
+        scanner.subscribe(this)
         if (hasLocationPermission()) {
-            scanService.scanOnce()
+            scanner.scanOnce()
         }
 
         availableAdapter = WiFiAdapter(storage, this)
@@ -78,39 +63,23 @@ class MainActivity : AppCompatActivity(),
             setLastStatusText(tvLastStatus, storage.getLastStatus())
             tvNetworksCount.text = "~~~"
             cbSendRequest.isChecked = storage.getChecked()
+            bot.shouldSendMessage = storage.getChecked()
             tvAvailableNetworksListTitle.isSelected = true
             val dividerItemDecoration = DividerItemDecoration(this@MainActivity, DividerItemDecoration.VERTICAL)
             rvNetworks.addItemDecoration(dividerItemDecoration)
             rvNetworks.adapter = availableAdapter
             tvAvailableNetworksListTitle.setOnClickListener(this@MainActivity)
             tvTrackingNetworksListTitle.setOnClickListener(this@MainActivity)
-            slider.setOnSeekBarChangeListener(object : OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar, value: Int, fromUser: Boolean) {
-                    if (fromUser) {
-                        storage.setDelayValue(value)
-                        tvValue.text = "$value"
-                    }
+            btnScan.setOnClickListener(this@MainActivity)
+            btnScanOnce.setOnClickListener(this@MainActivity)
+            slider.setOnSeekBarChangeListener(SeekBarListener(tvValue))
+            cbSendRequest.setOnCheckedChangeListener { view, isChecked ->
+                if (isChecked && !bot.isBotEnabled) {
+                    Snackbar.make(binding.root, "Unable to enable bot. Please specify bot.api.key and chat.id in local.properties file", Snackbar.LENGTH_LONG).show()
+                    view.isChecked = false
                 }
-                override fun onStartTrackingTouch(p0: SeekBar?) {}
-                override fun onStopTrackingTouch(p0: SeekBar?) {}
-            })
-            btnScan.setOnClickListener {
-                if (!scanService.isScanning()) {
-                    btnScan.text = getString(R.string.stop_scan)
-                    slider.isEnabled = false
-                    scanService.startScanning(storage.getDelayValue())
-                } else {
-                    stopScanning()
-                }
-                btnScanOnce.isEnabled = !scanService.isScanning()
-            }
-            btnScanOnce.setOnClickListener {
-                it.isEnabled = false
-                binding.btnScan.isEnabled = false
-                scanService.scanOnce()
-            }
-            cbSendRequest.setOnCheckedChangeListener { _, isChecked ->
-                storage.setChecked(isChecked)
+                bot.shouldSendMessage = isChecked && bot.isBotEnabled
+                storage.setChecked(isChecked && bot.isBotEnabled)
             }
         }
     }
@@ -118,7 +87,7 @@ class MainActivity : AppCompatActivity(),
     private fun ActivityMainBinding.stopScanning() {
         slider.isEnabled = true
         btnScan.text = getString(R.string.start_scan)
-        scanService.stopScanning()
+        scanner.stopScanning()
         btnScanOnce.isEnabled = true
     }
 
@@ -130,48 +99,13 @@ class MainActivity : AppCompatActivity(),
 
     override fun onStateChanged(status: Status, lastStatusTime: LocalDateTime?) {
         setLastStatusText(binding.tvLastStatus, status)
-        println(formatMessage(status, lastStatusTime))
-        if (binding.cbSendRequest.isChecked) {
-            if (bot.sendMessage(formatMessage(status, lastStatusTime))) {
-                Snackbar.make(binding.root, "Message sent", Snackbar.LENGTH_SHORT).show()
-            } else {
-                Snackbar.make(binding.root, "Message not sent. Please specify bot.api.key and chat.id in local.properties file", Snackbar.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    private fun formatMessage(status: Status, lastStatusTime: LocalDateTime?): String {
-        return when (status) {
-            is Status.Online -> {
-                val humanDuration = formatHumanDuration(status.since, lastStatusTime)
-                val readableSince = humanDuration?.let { "${br}Його не було $it" } ?: ""
-                "<b>Світло ввімкнули!</b> \uD83D\uDCA1$readableSince"
-            }
-            is Status.Offline -> {
-                "Світло вимкнули... ❌"
-            }
-        }
-    }
-
-    private fun formatHumanDuration(
-        current: LocalDateTime?,
-        lastStatusTime: LocalDateTime?
-    ): String? {
-        return if (current != null && lastStatusTime != null) {
-            val zdtCurrent: ZonedDateTime = current.truncatedTo(ChronoUnit.MINUTES).atZone(ZoneId.systemDefault())
-            val zdtLast: ZonedDateTime = lastStatusTime.truncatedTo(ChronoUnit.MINUTES).atZone(ZoneId.systemDefault())
-            val diff = zdtCurrent.toInstant().toEpochMilli() - zdtLast.toInstant().toEpochMilli()
-            humanizer.humanize(diff, humanizerOptions)
-        } else {
-            null
-        }
     }
 
     @SuppressLint("NotifyDataSetChanged")
     override fun onNetworksReceived(networks: List<WiFi>) {
         val filtered = networks.map { WiFi(it.name, it.level) }.toSet()
         binding.btnScan.isEnabled = storage.getNetworks().isNotEmpty()
-        binding.btnScanOnce.isEnabled = !scanService.isScanning()
+        binding.btnScanOnce.isEnabled = !scanner.isScanning()
         binding.tvNetworksCount.text = "${filtered.size}"
         availableAdapter.setNetworks(filtered)
     }
@@ -185,7 +119,7 @@ class MainActivity : AppCompatActivity(),
         with (binding) {
             root.postDelayed({
                 btnScan.isEnabled = true
-                btnScanOnce.isEnabled = !scanService.isScanning()
+                btnScanOnce.isEnabled = !scanner.isScanning()
             }, 2000)
         }
     }
@@ -202,7 +136,7 @@ class MainActivity : AppCompatActivity(),
 
     override fun onDestroy() {
         super.onDestroy()
-        scanService.unsubscribe(this)
+        scanner.unsubscribe(this)
     }
 
     override fun onRequestPermissionsResult(
@@ -215,18 +149,11 @@ class MainActivity : AppCompatActivity(),
                 if (grantResults[0] != PackageManager.PERMISSION_GRANTED) {
                     Toast.makeText(this, "This won't work without permissions", Toast.LENGTH_LONG).show()
                 } else {
-                    scanService.scanOnce()
+                    scanner.scanOnce()
                 }
             }
             else -> super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         }
-    }
-
-    companion object {
-        private const val SLIDER_MIN = 1
-        private const val SLIDER_MAX = 15
-        private const val REQUEST_CODE_LOCATION = 101
-        private val br = System.lineSeparator()
     }
 
     override fun onCheckedChange(checked: Boolean, item: WiFi) {
@@ -245,12 +172,27 @@ class MainActivity : AppCompatActivity(),
     @SuppressLint("NotifyDataSetChanged")
     override fun onClick(view: View) {
         when (view.id) {
-            R.id.tvAvailableNetworksListTitle -> {
+            binding.btnScanOnce.id -> {
+                view.isEnabled = false
+                binding.btnScan.isEnabled = false
+                scanner.scanOnce()
+            }
+            binding.btnScan.id -> {
+                if (!scanner.isScanning()) {
+                    binding.btnScan.text = getString(R.string.stop_scan)
+                    binding.slider.isEnabled = false
+                    scanner.startScanning(storage.getDelayValue())
+                } else {
+                    binding.stopScanning()
+                }
+                binding.btnScanOnce.isEnabled = !scanner.isScanning()
+            }
+            binding.tvAvailableNetworksListTitle.id -> {
                 view.isSelected = true
                 binding.tvTrackingNetworksListTitle.isSelected = false
                 binding.rvNetworks.adapter = availableAdapter.apply { notifyDataSetChanged() }
             }
-            R.id.tvTrackingNetworksListTitle -> {
+            binding.tvTrackingNetworksListTitle.id -> {
                 binding.tvAvailableNetworksListTitle.isSelected = false
                 view.isSelected = true
                 binding.rvNetworks.adapter = trackedAdapter.apply {
@@ -259,5 +201,22 @@ class MainActivity : AppCompatActivity(),
                 }
             }
         }
+    }
+
+    companion object {
+        private const val SLIDER_MIN = 1
+        private const val SLIDER_MAX = 15
+        private const val REQUEST_CODE_LOCATION = 101
+    }
+
+    inner class SeekBarListener(private val tvValue: TextView) : OnSeekBarChangeListener {
+        override fun onProgressChanged(seekBar: SeekBar, value: Int, fromUser: Boolean) {
+            if (fromUser) {
+                storage.setDelayValue(value)
+                tvValue.text = "$value"
+            }
+        }
+        override fun onStartTrackingTouch(p0: SeekBar?) {}
+        override fun onStopTrackingTouch(p0: SeekBar?) {}
     }
 }

@@ -15,9 +15,7 @@ import java.time.ZoneId
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
-import kotlin.time.ExperimentalTime
 
-@OptIn(ExperimentalTime::class)
 @Suppress("DEPRECATION")
 class Scanner(private val context: Context) {
 
