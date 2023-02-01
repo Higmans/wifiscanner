@@ -1,4 +1,4 @@
-package biz.lungo.wifiscanner
+package biz.lungo.wifiscanner.ui
 
 import android.annotation.SuppressLint
 import android.view.LayoutInflater
@@ -6,6 +6,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import biz.lungo.wifiscanner.R
+import biz.lungo.wifiscanner.data.Storage
+import biz.lungo.wifiscanner.data.WiFi
 import com.google.android.material.checkbox.MaterialCheckBox
 
 class WiFiAdapter(private val storage: Storage, private val checkboxListener: CheckboxListener): RecyclerView.Adapter<WiFiAdapter.WiFiViewHolder>() {

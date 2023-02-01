@@ -1,4 +1,4 @@
-package biz.lungo.wifiscanner
+package biz.lungo.wifiscanner.data
 
 data class WiFi(val name: String, val level: Int) {
 

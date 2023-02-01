@@ -1,5 +1,11 @@
-package biz.lungo.wifiscanner
+package biz.lungo.wifiscanner.service
 
+import biz.lungo.wifiscanner.*
+import biz.lungo.wifiscanner.data.Status
+import biz.lungo.wifiscanner.data.Status.*
+import biz.lungo.wifiscanner.data.UkrainianDictionary
+import biz.lungo.wifiscanner.data.WiFi
+import biz.lungo.wifiscanner.network.BotApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.flow
@@ -13,7 +19,7 @@ import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 
 class Bot(private val botApiKey: String?, private val botChatId: Long?) :
-    Scanner.OnStateChangedListener {
+    Scanner.OnStateChangedListener, Scheduler.ScheduleListener {
 
     var isBotEnabled = botApiKey != null && botChatId != null
     var shouldSendMessage = isBotEnabled
@@ -26,9 +32,19 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
             }
         }
 
+    var shouldSendReminder = isBotEnabled
+        set(value) {
+            field = value && isBotEnabled
+            if (field) {
+                WiFiScannerApplication.instance.scheduler.subscribe(this)
+            } else {
+                WiFiScannerApplication.instance.scheduler.unsubscribe(this)
+            }
+        }
+
     private val humanizer = DurationHumanizer()
     private val languages = mapOf("ukr" to UkrainianDictionary())
-    private val humanizerOptions = DurationHumanizer.Options(language = "Ukrainian", delimiter = "", languages = languages, fallbacks = listOf("ukr"))
+    private val humanizerOptions = DurationHumanizer.Options(language = "Ukrainian", delimiter = " ", languages = languages, fallbacks = listOf("ukr"))
 
     private val retrofit = Retrofit.Builder()
         .baseUrl(BOT_API_URL)
@@ -46,18 +62,21 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
         }.launchIn(CoroutineScope(Dispatchers.Default))
     }
 
-    private fun formatMessage(status: Status, lastStatusTime: LocalDateTime?): String {
+    private fun formatBlackoutMessage(status: Status, lastStatusTime: LocalDateTime?): String {
         return when (status) {
-            is Status.Online -> {
+            is Online -> {
                 val humanDuration = formatHumanDuration(status.since, lastStatusTime)
                 val readableSince = humanDuration?.let { "${br}Його не було $it" } ?: ""
                 "<b>Світло ввімкнули!</b> \uD83D\uDCA1$readableSince"
             }
-            is Status.Offline -> {
+            is Offline -> {
                 "Світло вимкнули... ❌"
             }
         }
     }
+
+    private fun formatReminderMessage(minutesUntil: Long) =
+        "⌛ Можливе вимкнення світла за графіком через $minutesUntil хв."
 
     private fun formatHumanDuration(
         current: LocalDateTime?,
@@ -83,10 +102,18 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
     }
 
     override fun onStateChanged(status: Status, lastStatusTime: LocalDateTime?) {
-        sendMessage(formatMessage(status, lastStatusTime))
+        sendMessage(formatBlackoutMessage(status, lastStatusTime))
     }
 
     override fun onNetworksReceived(networks: List<WiFi>) {
+        // no-op
+    }
+
+    override fun onSchedule(diffMinutes: Long) {
+        sendMessage(formatReminderMessage(diffMinutes))
+    }
+
+    override fun onNextBlackoutUpdated(nextBlackout: LocalDateTime) {
         // no-op
     }
 

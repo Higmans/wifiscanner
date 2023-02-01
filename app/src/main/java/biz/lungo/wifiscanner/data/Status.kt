@@ -1,4 +1,4 @@
-package biz.lungo.wifiscanner
+package biz.lungo.wifiscanner.data
 
 import java.time.LocalDateTime
 

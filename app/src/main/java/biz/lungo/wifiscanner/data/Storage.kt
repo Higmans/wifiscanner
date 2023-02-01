@@ -1,8 +1,11 @@
-package biz.lungo.wifiscanner
+package biz.lungo.wifiscanner.data
 
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import biz.lungo.wifiscanner.R
+import biz.lungo.wifiscanner.service.Scheduler
+import kotlinx.datetime.DayOfWeek
 
 class Storage(context: Context) {
 
@@ -20,14 +23,22 @@ class Storage(context: Context) {
 
     fun getDelayValue() = sharedPreferences.getInt(PREFS_NAME_DELAY_VALUE, DELAY_VALUE_DEFAULT)
 
-    fun setChecked(checked: Boolean) {
+    fun setSendMessageChecked(checked: Boolean) {
         sharedPreferences.edit {
-            putBoolean(PREFS_NAME_CHECKED, checked)
+            putBoolean(PREFS_NAME_SEND_MESSAGE_CHECKED, checked)
         }
 
     }
 
-    fun getChecked() = sharedPreferences.getBoolean(PREFS_NAME_CHECKED, false)
+    fun getSendMessageChecked() = sharedPreferences.getBoolean(PREFS_NAME_SEND_MESSAGE_CHECKED, false)
+
+    fun setSendReminderChecked(checked: Boolean) {
+        sharedPreferences.edit {
+            putBoolean(PREFS_NAME_SEND_REMINDER_CHECKED, checked)
+        }
+    }
+
+    fun getSendReminderChecked() = sharedPreferences.getBoolean(PREFS_NAME_SEND_REMINDER_CHECKED, false)
 
     fun setLastStatus(status: Status) {
         sharedPreferences.edit {
@@ -62,12 +73,39 @@ class Storage(context: Context) {
 
     fun isChecked(wiFi: WiFi): Boolean = getNetworks().any { it.name == wiFi.name }
 
+    fun setLastTriggeredSchedule(triggeredSchedule: Scheduler.TriggeredSchedule) {
+        sharedPreferences.edit {
+            putString(PREFS_NAME_LAST_TRIGGERED_SCHEDULE_DAY, triggeredSchedule.day.dow.name)
+            putInt(PREFS_NAME_LAST_TRIGGERED_SCHEDULE_HOUR, triggeredSchedule.hour)
+        }
+    }
+
+    fun getLastTriggeredSchedule(): Scheduler.TriggeredSchedule? {
+        val day = sharedPreferences.getString(PREFS_NAME_LAST_TRIGGERED_SCHEDULE_DAY, null)
+        val hour = sharedPreferences.getInt(PREFS_NAME_LAST_TRIGGERED_SCHEDULE_HOUR, 0)
+        return day?.let { Scheduler.TriggeredSchedule(it.toDay(), hour) }
+    }
+
+    private fun String.toDay() = when (this) {
+        DayOfWeek.MONDAY.name -> Scheduler.Day.Monday
+        DayOfWeek.TUESDAY.name -> Scheduler.Day.Tuesday
+        DayOfWeek.WEDNESDAY.name -> Scheduler.Day.Wednesday
+        DayOfWeek.THURSDAY.name -> Scheduler.Day.Thursday
+        DayOfWeek.FRIDAY.name -> Scheduler.Day.Friday
+        DayOfWeek.SATURDAY.name -> Scheduler.Day.Saturday
+        DayOfWeek.SUNDAY.name -> Scheduler.Day.Sunday
+        else -> throw IllegalArgumentException("Unknown day: $this")
+    }
+
     companion object {
         private const val PREFS_NAME_DELAY_VALUE = "PREFS_NAME_DELAY_VALUE"
-        private const val PREFS_NAME_CHECKED = "PREFS_NAME_CHECKED"
+        private const val PREFS_NAME_SEND_MESSAGE_CHECKED = "PREFS_NAME_CHECKED"
+        private const val PREFS_NAME_SEND_REMINDER_CHECKED = "PREFS_NAME_SEND_REMINDER_CHECKED"
         private const val PREFS_NAME_LAST_STATUS = "PREFS_NAME_LAST_STATUS"
         private const val PREFS_NAME_LAST_STATUS_SINCE = "PREFS_NAME_LAST_STATUS_SINCE"
         private const val PREFS_NAME_NETWORKS = "PREFS_NAME_NETWORKS"
+        private const val PREFS_NAME_LAST_TRIGGERED_SCHEDULE_DAY = "PREFS_NAME_LAST_TRIGGERED_SCHEDULE_DAY"
+        private const val PREFS_NAME_LAST_TRIGGERED_SCHEDULE_HOUR = "PREFS_NAME_LAST_TRIGGERED_SCHEDULE_HOUR"
         private const val DELAY_VALUE_DEFAULT = 1
     }
 }

@@ -1,4 +1,4 @@
-package biz.lungo.wifiscanner
+package biz.lungo.wifiscanner.ui
 
 import android.annotation.SuppressLint
 import android.view.LayoutInflater
@@ -7,6 +7,8 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.RecyclerView.ViewHolder
+import biz.lungo.wifiscanner.R
+import biz.lungo.wifiscanner.data.WiFi
 
 class WiFiTrackedAdapter(private val onRemoveListener: OnRemoveListener): RecyclerView.Adapter<ViewHolder>() {
 

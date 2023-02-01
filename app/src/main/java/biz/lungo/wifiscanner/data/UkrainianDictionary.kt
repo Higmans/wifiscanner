@@ -1,4 +1,4 @@
-package biz.lungo.wifiscanner
+package biz.lungo.wifiscanner.data
 
 import nl.mirrajabi.humanize.duration.languages.DictionaryKeys
 import nl.mirrajabi.humanize.duration.languages.LanguageDictionary

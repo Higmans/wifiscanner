@@ -8,7 +8,7 @@
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        tools:context=".MainActivity"
+        tools:context=".ui.MainActivity"
         tools:ignore="HardcodedText"
         tools:viewBindingIgnore="true">
 
@@ -85,10 +85,17 @@
                 android:id="@+id/cbSendRequest"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
                 android:text="@string/send_request"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toBottomOf="@id/slider" />
+
+            <com.google.android.material.checkbox.MaterialCheckBox
+                android:id="@+id/cbSendReminder"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/send_reminder"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/cbSendRequest" />
 
             <TextView
                 android:id="@+id/tvLastStatusTitle"
@@ -97,7 +104,7 @@
                 android:layout_marginTop="8dp"
                 android:text="@string/last_status"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/cbSendRequest" />
+                app:layout_constraintTop_toBottomOf="@id/cbSendReminder" />
 
             <TextView
                 android:id="@+id/tvLastStatus"
@@ -107,7 +114,7 @@
                 android:layout_marginTop="8dp"
                 android:text="---"
                 app:layout_constraintStart_toEndOf="@id/tvLastStatusTitle"
-                app:layout_constraintTop_toBottomOf="@id/cbSendRequest" />
+                app:layout_constraintTop_toBottomOf="@id/cbSendReminder" />
 
             <TextView
                 android:id="@+id/tvLastScanTitle"
@@ -129,13 +136,32 @@
                 app:layout_constraintTop_toBottomOf="@id/tvLastStatus" />
 
             <TextView
+                android:id="@+id/tvNextBlackoutTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/next_blackout"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@id/tvLastScan" />
+
+            <TextView
+                android:id="@+id/tvNextBlackout"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="3dp"
+                android:layout_marginTop="4dp"
+                android:text="---"
+                app:layout_constraintStart_toEndOf="@id/tvNextBlackoutTitle"
+                app:layout_constraintTop_toBottomOf="@id/tvLastScan" />
+
+            <TextView
                 android:id="@+id/tvNetworksTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
                 android:text="Available networks:"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/tvLastScanTitle" />
+                app:layout_constraintTop_toBottomOf="@id/tvNextBlackoutTitle" />
 
             <TextView
                 android:id="@+id/tvNetworksCount"
@@ -145,7 +171,7 @@
                 android:layout_marginTop="16dp"
                 android:textStyle="bold"
                 app:layout_constraintStart_toEndOf="@id/tvNetworksTitle"
-                app:layout_constraintTop_toBottomOf="@id/tvLastScanTitle"
+                app:layout_constraintTop_toBottomOf="@id/tvNextBlackoutTitle"
                 tools:text="8" />
 
             <TextView

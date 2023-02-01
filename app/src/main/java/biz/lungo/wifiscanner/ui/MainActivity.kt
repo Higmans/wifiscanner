@@ -1,31 +1,44 @@
-package biz.lungo.wifiscanner
+package biz.lungo.wifiscanner.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.View
+import android.widget.CompoundButton
 import android.widget.SeekBar
 import android.widget.SeekBar.OnSeekBarChangeListener
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DividerItemDecoration
+import biz.lungo.wifiscanner.*
+import biz.lungo.wifiscanner.service.Scanner
+import biz.lungo.wifiscanner.data.Status
+import biz.lungo.wifiscanner.data.Storage
+import biz.lungo.wifiscanner.data.WiFi
 import biz.lungo.wifiscanner.databinding.ActivityMainBinding
+import biz.lungo.wifiscanner.service.Bot
+import biz.lungo.wifiscanner.service.Scheduler
+import biz.lungo.wifiscanner.util.formatLocalized
 import com.google.android.material.snackbar.Snackbar
+import kotlinx.coroutines.launch
+import kotlinx.datetime.toJavaLocalDateTime
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
+import java.util.*
 
 class MainActivity : AppCompatActivity(),
     Scanner.OnStateChangedListener,
     WiFiAdapter.CheckboxListener,
-    View.OnClickListener {
+    View.OnClickListener, Scheduler.ScheduleListener {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var availableAdapter: WiFiAdapter
     private lateinit var trackedAdapter: WiFiTrackedAdapter
     private val storage by lazy { Storage(this) }
+    private val scheduler: Scheduler
+        get() = WiFiScannerApplication.instance.scheduler
     private val scanner: Scanner
         get() = WiFiScannerApplication.instance.scanner
     private val bot: Bot
@@ -35,9 +48,7 @@ class MainActivity : AppCompatActivity(),
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         scanner.subscribe(this)
-        if (hasLocationPermission()) {
-            scanner.scanOnce()
-        }
+        scheduler.subscribe(this)
 
         availableAdapter = WiFiAdapter(storage, this)
 
@@ -62,8 +73,10 @@ class MainActivity : AppCompatActivity(),
             btnScan.isEnabled = false
             setLastStatusText(tvLastStatus, storage.getLastStatus())
             tvNetworksCount.text = "~~~"
-            cbSendRequest.isChecked = storage.getChecked()
-            bot.shouldSendMessage = storage.getChecked()
+            cbSendRequest.isChecked = storage.getSendMessageChecked()
+            cbSendReminder.isChecked = storage.getSendReminderChecked()
+            bot.shouldSendMessage = storage.getSendMessageChecked()
+            tvNextBlackout.text = scheduler.nextScheduledBlackout.toJavaLocalDateTime().formatLocalized()
             tvAvailableNetworksListTitle.isSelected = true
             val dividerItemDecoration = DividerItemDecoration(this@MainActivity, DividerItemDecoration.VERTICAL)
             rvNetworks.addItemDecoration(dividerItemDecoration)
@@ -73,14 +86,12 @@ class MainActivity : AppCompatActivity(),
             btnScan.setOnClickListener(this@MainActivity)
             btnScanOnce.setOnClickListener(this@MainActivity)
             slider.setOnSeekBarChangeListener(SeekBarListener(tvValue))
-            cbSendRequest.setOnCheckedChangeListener { view, isChecked ->
-                if (isChecked && !bot.isBotEnabled) {
-                    Snackbar.make(binding.root, "Unable to enable bot. Please specify bot.api.key and chat.id in local.properties file", Snackbar.LENGTH_LONG).show()
-                    view.isChecked = false
-                }
-                bot.shouldSendMessage = isChecked && bot.isBotEnabled
-                storage.setChecked(isChecked && bot.isBotEnabled)
-            }
+            val botCheckboxListener = BotCheckboxListener()
+            cbSendRequest.setOnCheckedChangeListener(botCheckboxListener)
+            cbSendReminder.setOnCheckedChangeListener(botCheckboxListener)
+        }
+        if (hasLocationPermission()) {
+            binding.btnScanOnce.performClick()
         }
     }
 
@@ -93,7 +104,7 @@ class MainActivity : AppCompatActivity(),
 
     private fun setLastStatusText(textView: TextView, status: Status?) {
         textView.text = status?.let {
-            "${it.state.uppercase()} since ${it.since?.format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT)) ?: ""}"
+            "${it.state.uppercase()} since ${it.since?.formatLocalized() ?: ""}"
         } ?: "---"
     }
 
@@ -111,7 +122,7 @@ class MainActivity : AppCompatActivity(),
     }
 
     override fun onScanComplete() {
-        binding.tvLastScan.text = LocalDateTime.now().format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT))
+        binding.tvLastScan.text = LocalDateTime.now().formatLocalized()
     }
 
     override fun onScanThrottled() {
@@ -137,6 +148,7 @@ class MainActivity : AppCompatActivity(),
     override fun onDestroy() {
         super.onDestroy()
         scanner.unsubscribe(this)
+        scheduler.unsubscribe(this)
     }
 
     override fun onRequestPermissionsResult(
@@ -166,6 +178,16 @@ class MainActivity : AppCompatActivity(),
                 binding.stopScanning()
                 binding.btnScan.isEnabled = false
             }
+        }
+    }
+
+    override fun onSchedule(diffMinutes: Long) {
+        Snackbar.make(binding.root, "Next blackout in $diffMinutes minutes", Snackbar.LENGTH_LONG).show()
+    }
+
+    override fun onNextBlackoutUpdated(nextBlackout: LocalDateTime) {
+        lifecycleScope.launch {
+            binding.tvNextBlackout.text = nextBlackout.formatLocalized()
         }
     }
 
@@ -218,5 +240,25 @@ class MainActivity : AppCompatActivity(),
         }
         override fun onStartTrackingTouch(p0: SeekBar?) {}
         override fun onStopTrackingTouch(p0: SeekBar?) {}
+    }
+
+    inner class BotCheckboxListener : CompoundButton.OnCheckedChangeListener {
+        override fun onCheckedChanged(view: CompoundButton, isChecked: Boolean) {
+            if (isChecked && !bot.isBotEnabled) {
+                Snackbar.make(binding.root, "Unable to enable bot. Please specify bot.api.key and chat.id in local.properties file", Snackbar.LENGTH_LONG).show()
+                view.isChecked = false
+            }
+            when (view.id) {
+                binding.cbSendRequest.id -> {
+                    bot.shouldSendMessage = isChecked
+                    storage.setSendMessageChecked(isChecked && bot.isBotEnabled)
+                }
+
+                binding.cbSendReminder.id -> {
+                    bot.shouldSendReminder = isChecked
+                    storage.setSendReminderChecked(isChecked && bot.isBotEnabled)
+                }
+            }
+        }
     }
 }

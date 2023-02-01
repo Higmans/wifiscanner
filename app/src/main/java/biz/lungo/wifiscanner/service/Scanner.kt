@@ -1,4 +1,4 @@
-package biz.lungo.wifiscanner
+package biz.lungo.wifiscanner.service
 
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
@@ -8,12 +8,15 @@ import android.content.IntentFilter
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.widget.Toast
+import biz.lungo.wifiscanner.data.Status
+import biz.lungo.wifiscanner.data.Storage
+import biz.lungo.wifiscanner.data.WiFi
+import biz.lungo.wifiscanner.util.tickerFlow
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 @Suppress("DEPRECATION")
@@ -158,14 +161,6 @@ class Scanner(private val context: Context) {
     }
 
     fun isScanning() = job != null
-
-    private fun tickerFlow(period: Duration, initialDelay: Duration = Duration.ZERO) = flow {
-        delay(initialDelay)
-        while (true) {
-            emit(Unit)
-            delay(period)
-        }
-    }
 
     fun subscribe(listener: OnStateChangedListener) {
         subscribers.add(listener)

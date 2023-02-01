@@ -1,6 +1,10 @@
 package biz.lungo.wifiscanner
 
 import android.app.Application
+import biz.lungo.wifiscanner.data.Storage
+import biz.lungo.wifiscanner.service.Bot
+import biz.lungo.wifiscanner.service.Scanner
+import biz.lungo.wifiscanner.service.Scheduler
 
 class WiFiScannerApplication : Application() {
 
@@ -16,10 +20,12 @@ class WiFiScannerApplication : Application() {
 
     val bot: Bot by lazy { Bot(botApiKey, botChatId) }
     val scanner: Scanner by lazy { Scanner(this) }
+    val scheduler: Scheduler by lazy { Scheduler(Storage(this)) }
 
     override fun onCreate() {
         super.onCreate()
         instance = this
+        scheduler.start()
     }
 
     companion object {
