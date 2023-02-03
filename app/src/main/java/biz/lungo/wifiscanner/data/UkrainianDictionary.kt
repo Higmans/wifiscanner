@@ -9,7 +9,7 @@ class UkrainianDictionary : LanguageDictionary {
         DictionaryKeys.MONTH to "м.",
         DictionaryKeys.WEEK to "тиж.",
         DictionaryKeys.DAY to "д.",
-        DictionaryKeys.HOUR to "г.",
+        DictionaryKeys.HOUR to "год.",
         DictionaryKeys.MINUTE to "хв.",
         DictionaryKeys.SECOND to "сек.",
         DictionaryKeys.MILLISECOND to "мс.",

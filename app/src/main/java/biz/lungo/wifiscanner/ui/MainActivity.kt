@@ -4,7 +4,11 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
 import android.view.View
+import android.widget.CheckBox
 import android.widget.CompoundButton
 import android.widget.SeekBar
 import android.widget.SeekBar.OnSeekBarChangeListener
@@ -14,12 +18,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DividerItemDecoration
 import biz.lungo.wifiscanner.*
-import biz.lungo.wifiscanner.service.Scanner
 import biz.lungo.wifiscanner.data.Status
 import biz.lungo.wifiscanner.data.Storage
 import biz.lungo.wifiscanner.data.WiFi
 import biz.lungo.wifiscanner.databinding.ActivityMainBinding
 import biz.lungo.wifiscanner.service.Bot
+import biz.lungo.wifiscanner.service.Scanner
 import biz.lungo.wifiscanner.service.Scheduler
 import biz.lungo.wifiscanner.util.formatLocalized
 import com.google.android.material.snackbar.Snackbar
@@ -49,6 +53,9 @@ class MainActivity : AppCompatActivity(),
         binding = ActivityMainBinding.inflate(layoutInflater)
         scanner.subscribe(this)
         scheduler.subscribe(this)
+        if (storage.getKeepAwake()) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
 
         availableAdapter = WiFiAdapter(storage, this)
 
@@ -66,6 +73,21 @@ class MainActivity : AppCompatActivity(),
 
         with(binding) {
             setContentView(root)
+            toolbar.inflateMenu(R.menu.menu_main)
+            (toolbar.menu.findItem(R.id.cbKeepAwake).actionView as? CheckBox)?.let { checkbox ->
+                checkbox.layoutDirection = View.LAYOUT_DIRECTION_RTL
+                checkbox.setText(R.string.keep_awake)
+                checkbox.setTextColor(getColor(R.color.white))
+                checkbox.isChecked = storage.getKeepAwake()
+                checkbox.setOnCheckedChangeListener { _, isChecked ->
+                    storage.setKeepAwake(isChecked)
+                    if (isChecked) {
+                        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                }
+            }
             slider.min = SLIDER_MIN
             slider.max = SLIDER_MAX
             slider.progress = storage.getDelayValue()
@@ -104,7 +126,16 @@ class MainActivity : AppCompatActivity(),
 
     private fun setLastStatusText(textView: TextView, status: Status?) {
         textView.text = status?.let {
-            "${it.state.uppercase()} since ${it.since?.formatLocalized() ?: ""}"
+            val state = it.state.uppercase()
+            val rawText = "${it.since?.formatLocalized() ?: ""} ($state)"
+            SpannableString(rawText).apply {
+                setSpan(
+                    ForegroundColorSpan(getColor(status.textColor)),
+                    rawText.indexOf(state),
+                    rawText.indexOf(state) + state.length,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
         } ?: "---"
     }
 

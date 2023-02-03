@@ -86,6 +86,14 @@ class Storage(context: Context) {
         return day?.let { Scheduler.TriggeredSchedule(it.toDay(), hour) }
     }
 
+    fun setKeepAwake(keepAwake: Boolean) {
+        sharedPreferences.edit {
+            putBoolean(PREFS_NAME_KEEP_AWAKE, keepAwake)
+        }
+    }
+
+    fun getKeepAwake() = sharedPreferences.getBoolean(PREFS_NAME_KEEP_AWAKE, false)
+
     private fun String.toDay() = when (this) {
         DayOfWeek.MONDAY.name -> Scheduler.Day.Monday
         DayOfWeek.TUESDAY.name -> Scheduler.Day.Tuesday
@@ -106,6 +114,7 @@ class Storage(context: Context) {
         private const val PREFS_NAME_NETWORKS = "PREFS_NAME_NETWORKS"
         private const val PREFS_NAME_LAST_TRIGGERED_SCHEDULE_DAY = "PREFS_NAME_LAST_TRIGGERED_SCHEDULE_DAY"
         private const val PREFS_NAME_LAST_TRIGGERED_SCHEDULE_HOUR = "PREFS_NAME_LAST_TRIGGERED_SCHEDULE_HOUR"
+        private const val PREFS_NAME_KEEP_AWAKE = "PREFS_NAME_KEEP_AWAKE"
         private const val DELAY_VALUE_DEFAULT = 1
     }
 }

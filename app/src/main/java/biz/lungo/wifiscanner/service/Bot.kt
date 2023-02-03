@@ -67,16 +67,16 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
             is Online -> {
                 val humanDuration = formatHumanDuration(status.since, lastStatusTime)
                 val readableSince = humanDuration?.let { "${br}Його не було $it" } ?: ""
-                "<b>Світло ввімкнули!</b> \uD83D\uDCA1$readableSince"
+                "<b>Світло є!</b> \uD83D\uDCA1$readableSince"
             }
             is Offline -> {
-                "Світло вимкнули... ❌"
+                "Світло відключили... ❌"
             }
         }
     }
 
     private fun formatReminderMessage(minutesUntil: Long) =
-        "⌛ Можливе вимкнення світла за графіком через $minutesUntil хв."
+        "⌛ Можливе відключення світла за графіком через $minutesUntil хв."
 
     private fun formatHumanDuration(
         current: LocalDateTime?,

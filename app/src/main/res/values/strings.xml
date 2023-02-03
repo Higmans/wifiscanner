@@ -13,4 +13,5 @@
     <string name="tracked_networks">Tracked networks</string>
     <string name="btn_x">X</string>
     <string name="db_format">%1$s db</string>
+    <string name="keep_awake">Keep Awake</string>
 </resources>

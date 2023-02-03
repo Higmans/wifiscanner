@@ -116,26 +116,7 @@ class Scheduler(private val storage: Storage) {
         object Sunday : Day(DayOfWeek.SUNDAY, listOf(0, 9, 18), Monday)
     }
 
-    data class TriggeredSchedule(val day: Day, val hour: Int) {
-
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (javaClass != other?.javaClass) return false
-
-            other as TriggeredSchedule
-
-            if (day != other.day) return false
-            if (hour != other.hour) return false
-
-            return true
-        }
-
-        override fun hashCode(): Int {
-            var result = day.hashCode()
-            result = 31 * result + hour
-            return result
-        }
-    }
+    data class TriggeredSchedule(val day: Day, val hour: Int)
 
     interface ScheduleListener {
         fun onSchedule(diffMinutes: Long)
