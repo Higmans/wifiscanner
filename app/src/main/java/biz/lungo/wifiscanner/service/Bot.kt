@@ -1,15 +1,20 @@
 package biz.lungo.wifiscanner.service
 
+import android.util.Log
 import biz.lungo.wifiscanner.*
 import biz.lungo.wifiscanner.data.Status
 import biz.lungo.wifiscanner.data.Status.*
+import biz.lungo.wifiscanner.data.Storage
 import biz.lungo.wifiscanner.data.UkrainianDictionary
 import biz.lungo.wifiscanner.data.WiFi
 import biz.lungo.wifiscanner.network.BotApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.retryWhen
 import nl.mirrajabi.humanize.duration.DurationHumanizer
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -51,6 +56,7 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
         .addConverterFactory(GsonConverterFactory.create())
         .build()
     private val botApiService = retrofit.create(BotApi::class.java)
+    private val storage by lazy { Storage(WiFiScannerApplication.instance) }
 
     private fun sendMessage(message: String) {
         if (botApiKey == null || botChatId == null) {
@@ -59,6 +65,12 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
         flow {
             botApiService.sendMessage(botApiKey, MessageRequest(botChatId, message, ParseMode.HTML.value))
             emit(Unit)
+        }.retryWhen { cause, attempt ->
+            Log.e("Bot", "Failed to send message: $message", cause)
+            delay(RETRY_DELAY)
+            attempt < MAX_RETRY_COUNT
+        }.catch {
+            Log.e("Bot", "Failed to send message: $message", it)
         }.launchIn(CoroutineScope(Dispatchers.Default))
     }
 
@@ -110,7 +122,9 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
     }
 
     override fun onSchedule(diffMinutes: Long) {
-        sendMessage(formatReminderMessage(diffMinutes))
+        if (storage.getLastStatus() is Online) {
+            sendMessage(formatReminderMessage(diffMinutes))
+        }
     }
 
     override fun onNextBlackoutUpdated(nextBlackout: LocalDateTime) {
@@ -119,6 +133,8 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
 
     companion object {
         private const val BOT_API_URL = "https://api.telegram.org"
+        private const val MAX_RETRY_COUNT = 10
+        private const val RETRY_DELAY = 500L
         private val br = System.lineSeparator()
     }
 }

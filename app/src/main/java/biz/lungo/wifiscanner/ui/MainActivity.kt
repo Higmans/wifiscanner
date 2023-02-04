@@ -95,9 +95,12 @@ class MainActivity : AppCompatActivity(),
             btnScan.isEnabled = false
             setLastStatusText(tvLastStatus, storage.getLastStatus())
             tvNetworksCount.text = "~~~"
-            cbSendRequest.isChecked = storage.getSendMessageChecked()
-            cbSendReminder.isChecked = storage.getSendReminderChecked()
-            bot.shouldSendMessage = storage.getSendMessageChecked()
+            val sendMessageChecked = storage.getSendMessageChecked()
+            val sendReminderChecked = storage.getSendReminderChecked()
+            cbSendRequest.isChecked = sendMessageChecked
+            cbSendReminder.isChecked = sendReminderChecked
+            bot.shouldSendMessage = sendMessageChecked
+            bot.shouldSendReminder = sendReminderChecked
             tvNextBlackout.text = scheduler.nextScheduledBlackout.toJavaLocalDateTime().formatLocalized()
             tvAvailableNetworksListTitle.isSelected = true
             val dividerItemDecoration = DividerItemDecoration(this@MainActivity, DividerItemDecoration.VERTICAL)
