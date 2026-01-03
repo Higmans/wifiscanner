@@ -10,6 +10,7 @@ import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.widget.Toast
+import android.util.Log
 import biz.lungo.wifiscanner.BuildConfig
 import biz.lungo.wifiscanner.data.ScanMode
 import biz.lungo.wifiscanner.data.Status
@@ -112,11 +113,13 @@ class Scanner(private val context: Context) {
         if (lastStatus?.state != currentStatus.state) {
             if (storage.getScanMode() == ScanMode.Hybrid && currentStatus is Status.Online && lastStatus is Status.Offline) {
                 // Only stop WiFi scanning if phone is actually charging
+                Log.d("Scanner", "Offline->Online transition, hasPower=${hasPower()}")
                 if (hasPower()) {
                     stopNetworkScanning()
                     stopWebhookTimer()
                 } else {
                     // Online but not charging - start webhook timer
+                    Log.d("Scanner", "Starting webhook timer (Offline->Online, not charging)")
                     startWebhookTimer()
                 }
             }
@@ -247,8 +250,20 @@ class Scanner(private val context: Context) {
                 if (startNetworkScanning) {
                     startNetworkScanning()
                 }
+                // Start webhook timer in Hybrid mode (will be stopped if status goes Offline)
+                if (storage.getScanMode() == ScanMode.Hybrid) {
+                    startWebhookTimer()
+                }
                 // Perform a WiFi scan to verify - scanSuccess() will handle state transition
                 scanOnce()
+            } else if (storage.getScanMode() == ScanMode.Hybrid &&
+                       lastStatus is Status.Online &&
+                       !hasPower()) {
+                // Power still offline while Online - start webhook timer
+                startWebhookTimer()
+                if (startNetworkScanning && job == null) {
+                    startNetworkScanning()
+                }
             }
             emit(Unit)
         }.launchIn(CoroutineScope(Dispatchers.Main))
@@ -313,17 +328,24 @@ class Scanner(private val context: Context) {
     }
 
     private fun startWebhookTimer() {
-        if (webhookJob != null) return // Already running
+        Log.d("Scanner", "startWebhookTimer called, webhookJob=${webhookJob}")
+        if (webhookJob != null) {
+            Log.d("Scanner", "Webhook timer already running, skipping")
+            return
+        }
         webhookJob = tickerFlow(3.minutes)
             .onEach {
+                Log.d("Scanner", "Webhook tick: mode=${storage.getScanMode()}, status=${storage.getLastStatus()?.state}, hasPower=${hasPower()}")
                 // Only send if still in Hybrid mode, Online, and not charging
                 if (storage.getScanMode() == ScanMode.Hybrid &&
                     storage.getLastStatus() is Status.Online &&
                     !hasPower()) {
                     try {
+                        Log.d("Scanner", "Sending webhook to ${BuildConfig.WEBHOOK_BASE_URL} with id ${BuildConfig.WEBHOOK_ID}")
                         webhookApi.notifyPowerOnline(BuildConfig.WEBHOOK_ID)
+                        Log.d("Scanner", "Webhook sent successfully")
                     } catch (e: Exception) {
-                        // Silently ignore webhook failures
+                        Log.e("Scanner", "Webhook failed", e)
                     }
                 }
             }
