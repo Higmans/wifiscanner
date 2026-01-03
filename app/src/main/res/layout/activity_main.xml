@@ -178,6 +178,30 @@
                 tools:text="8" />
 
             <TextView
+                android:id="@+id/tvNetworksThresholdTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Networks threshold:"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="@id/etNetworksThreshold"
+                app:layout_constraintBottom_toBottomOf="@id/etNetworksThreshold"/>
+
+            <EditText
+                android:id="@+id/etNetworksThreshold"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="3dp"
+                android:layout_marginTop="16dp"
+                android:textStyle="bold"
+                android:inputType="number"
+                android:maxLength="2"
+                android:minWidth="8dp"
+                app:layout_constraintStart_toEndOf="@id/tvNetworksThresholdTitle"
+                app:layout_constraintTop_toBottomOf="@id/tvNetworksTitle"
+                tools:text="8" />
+
+            <TextView
                 android:id="@+id/tvAvailableNetworksListTitle"
                 style="@style/TextAppearance.AppCompat.Large"
                 android:layout_width="196dp"
@@ -190,7 +214,7 @@
                 android:textColor="@color/color_title"
                 app:layout_constraintHorizontal_chainStyle="spread_inside"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/tvNetworksCount" />
+                app:layout_constraintTop_toBottomOf="@id/etNetworksThreshold" />
 
             <TextView
                 android:id="@+id/tvTrackingNetworksListTitle"
@@ -204,7 +228,7 @@
                 android:text="@string/tracked_networks"
                 android:textColor="@color/color_title"
                 app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/tvNetworksCount" />
+                app:layout_constraintTop_toBottomOf="@id/etNetworksThreshold" />
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/rvNetworks"

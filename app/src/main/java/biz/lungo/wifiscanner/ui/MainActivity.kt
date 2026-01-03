@@ -2,35 +2,46 @@ package biz.lungo.wifiscanner.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.BatteryManager
 import android.os.Bundle
+import android.text.Editable
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
 import android.view.View
+import android.widget.AdapterView
+import android.widget.AdapterView.OnItemSelectedListener
+import android.widget.ArrayAdapter
 import android.widget.CheckBox
 import android.widget.CompoundButton
 import android.widget.SeekBar
 import android.widget.SeekBar.OnSeekBarChangeListener
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.widget.doOnTextChanged
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DividerItemDecoration
 import biz.lungo.wifiscanner.*
+import biz.lungo.wifiscanner.data.ScanMode
 import biz.lungo.wifiscanner.data.Status
 import biz.lungo.wifiscanner.data.Storage
 import biz.lungo.wifiscanner.data.WiFi
 import biz.lungo.wifiscanner.databinding.ActivityMainBinding
 import biz.lungo.wifiscanner.service.Bot
 import biz.lungo.wifiscanner.service.Scanner
+import biz.lungo.wifiscanner.service.ScannerService
 import biz.lungo.wifiscanner.service.Scheduler
 import biz.lungo.wifiscanner.util.formatLocalized
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.launch
 import kotlinx.datetime.toJavaLocalDateTime
 import java.time.LocalDateTime
-import java.util.*
 
 class MainActivity : AppCompatActivity(),
     Scanner.OnStateChangedListener,
@@ -47,6 +58,19 @@ class MainActivity : AppCompatActivity(),
         get() = WiFiScannerApplication.instance.scanner
     private val bot: Bot
         get() = WiFiScannerApplication.instance.bot
+    private val scanModeSpinner: Spinner?
+        get() = binding.toolbar.menu.findItem(R.id.spinnerScanMode).actionView as? Spinner
+
+    private val scannerServiceIntent: Intent by lazy {
+        Intent(
+            this,
+            ScannerService::class.java
+        )
+    }
+
+    private val pushNotificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,6 +112,22 @@ class MainActivity : AppCompatActivity(),
                     }
                 }
             }
+            scanModeSpinner?.let { spinner ->
+                spinner.adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, ScanMode.values())
+                spinner.setSelection(ScanMode.values().indexOf(storage.getScanMode()))
+                spinner.onItemSelectedListener = object : OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        val selectedMode = ScanMode.values()[position]
+                        storage.setScanMode(selectedMode)
+                        binding.btnScan.isEnabled = storage.getNetworks().isNotEmpty() || selectedMode == ScanMode.Power
+                    }
+
+                    override fun onNothingSelected(p0: AdapterView<*>?) {
+                    }
+
+                }
+                spinner.isEnabled = !scanner.isScanning
+            }
             slider.min = SLIDER_MIN
             slider.max = SLIDER_MAX
             slider.progress = storage.getDelayValue()
@@ -99,7 +139,7 @@ class MainActivity : AppCompatActivity(),
             val sendReminderChecked = storage.getSendReminderChecked()
             cbSendRequest.isChecked = sendMessageChecked
             cbSendReminder.isChecked = sendReminderChecked
-            bot.shouldSendMessage = sendMessageChecked
+            bot.shouldSendMessage = sendMessageChecked && scanner.isScanning
             bot.shouldSendReminder = sendReminderChecked
             tvNextBlackout.text = scheduler.nextScheduledBlackout.toJavaLocalDateTime().formatLocalized()
             tvAvailableNetworksListTitle.isSelected = true
@@ -114,6 +154,10 @@ class MainActivity : AppCompatActivity(),
             val botCheckboxListener = BotCheckboxListener()
             cbSendRequest.setOnCheckedChangeListener(botCheckboxListener)
             cbSendReminder.setOnCheckedChangeListener(botCheckboxListener)
+            etNetworksThreshold.text = Editable.Factory.getInstance().newEditable(storage.getNetworksThreshold().toString())
+            etNetworksThreshold.doOnTextChanged { text, _, _, _ ->
+                storage.setNetworksThreshold(text.toString().toIntOrNull() ?: 10)
+            }
         }
         if (hasLocationPermission()) {
             binding.btnScanOnce.performClick()
@@ -121,10 +165,12 @@ class MainActivity : AppCompatActivity(),
     }
 
     private fun ActivityMainBinding.stopScanning() {
+        stopService(scannerServiceIntent)
         slider.isEnabled = true
         btnScan.text = getString(R.string.start_scan)
-        scanner.stopScanning()
         btnScanOnce.isEnabled = true
+        scanModeSpinner?.isEnabled = true
+        bot.shouldSendMessage = false
     }
 
     private fun setLastStatusText(textView: TextView, status: Status?) {
@@ -142,6 +188,10 @@ class MainActivity : AppCompatActivity(),
         } ?: "---"
     }
 
+    private fun checkPowerStatus() {
+        scanner.onPowerStateChanged(scanner.hasPower(), true)
+    }
+
     override fun onStateChanged(status: Status, lastStatusTime: LocalDateTime?) {
         setLastStatusText(binding.tvLastStatus, status)
     }
@@ -149,8 +199,8 @@ class MainActivity : AppCompatActivity(),
     @SuppressLint("NotifyDataSetChanged")
     override fun onNetworksReceived(networks: List<WiFi>) {
         val filtered = networks.map { WiFi(it.name, it.level) }.toSet()
-        binding.btnScan.isEnabled = storage.getNetworks().isNotEmpty()
-        binding.btnScanOnce.isEnabled = !scanner.isScanning()
+        binding.btnScan.isEnabled = storage.getNetworks().isNotEmpty() || storage.getScanMode() == ScanMode.Power
+        binding.btnScanOnce.isEnabled = !scanner.isScanning
         binding.tvNetworksCount.text = "${filtered.size}"
         availableAdapter.setNetworks(filtered)
     }
@@ -164,7 +214,7 @@ class MainActivity : AppCompatActivity(),
         with (binding) {
             root.postDelayed({
                 btnScan.isEnabled = true
-                btnScanOnce.isEnabled = !scanner.isScanning()
+                btnScanOnce.isEnabled = !scanner.isScanning
             }, 2000)
         }
     }
@@ -173,6 +223,8 @@ class MainActivity : AppCompatActivity(),
         super.onResume()
         if (!hasLocationPermission()) {
             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQUEST_CODE_LOCATION)
+        } else {
+            pushNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -192,10 +244,11 @@ class MainActivity : AppCompatActivity(),
     ) {
         when (requestCode) {
             REQUEST_CODE_LOCATION -> {
-                if (grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                if (grantResults.isEmpty() || grantResults[0] != PackageManager.PERMISSION_GRANTED) {
                     Toast.makeText(this, "This won't work without permissions", Toast.LENGTH_LONG).show()
                 } else {
-                    scanner.scanOnce()
+                    pushNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    binding.btnScanOnce.performClick()
                 }
             }
             else -> super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -232,16 +285,19 @@ class MainActivity : AppCompatActivity(),
                 view.isEnabled = false
                 binding.btnScan.isEnabled = false
                 scanner.scanOnce()
+                checkPowerStatus()
             }
             binding.btnScan.id -> {
-                if (!scanner.isScanning()) {
+                if (!scanner.isScanning) {
                     binding.btnScan.text = getString(R.string.stop_scan)
                     binding.slider.isEnabled = false
-                    scanner.startScanning(storage.getDelayValue())
+                    binding.btnScanOnce.isEnabled = false
+                    startService(scannerServiceIntent)
+                    scanModeSpinner?.isEnabled = false
+                    bot.shouldSendMessage = storage.getSendMessageChecked()
                 } else {
                     binding.stopScanning()
                 }
-                binding.btnScanOnce.isEnabled = !scanner.isScanning()
             }
             binding.tvAvailableNetworksListTitle.id -> {
                 view.isSelected = true
@@ -284,7 +340,7 @@ class MainActivity : AppCompatActivity(),
             }
             when (view.id) {
                 binding.cbSendRequest.id -> {
-                    bot.shouldSendMessage = isChecked
+                    bot.shouldSendMessage = isChecked && scanner.isScanning
                     storage.setSendMessageChecked(isChecked && bot.isBotEnabled)
                 }
 

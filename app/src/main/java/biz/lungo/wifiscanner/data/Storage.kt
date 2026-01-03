@@ -9,11 +9,8 @@ import kotlinx.datetime.DayOfWeek
 
 class Storage(context: Context) {
 
-    private val sharedPreferences: SharedPreferences
-
-    init {
-        sharedPreferences = context.getSharedPreferences(context.getString(R.string.app_name), Context.MODE_PRIVATE)
-    }
+    private val sharedPreferences: SharedPreferences =
+        context.getSharedPreferences(context.getString(R.string.app_name), Context.MODE_PRIVATE)
 
     fun setDelayValue(value: Int) {
         sharedPreferences.edit {
@@ -94,6 +91,22 @@ class Storage(context: Context) {
 
     fun getKeepAwake() = sharedPreferences.getBoolean(PREFS_NAME_KEEP_AWAKE, false)
 
+    fun setScanMode(scanMode: ScanMode) {
+        sharedPreferences.edit {
+            putString(PREFS_NAME_SCAN_MODE, scanMode.name)
+        }
+    }
+
+    fun getScanMode() = ScanMode.fromString(sharedPreferences.getString(PREFS_NAME_SCAN_MODE, null))
+
+    fun getNetworksThreshold() =  sharedPreferences.getInt(PREFS_NAME_NETWORKS_THRESHOLD, 10)
+
+    fun setNetworksThreshold(threshold: Int) {
+        sharedPreferences.edit {
+            putInt(PREFS_NAME_NETWORKS_THRESHOLD, threshold)
+        }
+    }
+
     private fun String.toDay() = when (this) {
         DayOfWeek.MONDAY.name -> Scheduler.Day.Monday
         DayOfWeek.TUESDAY.name -> Scheduler.Day.Tuesday
@@ -115,6 +128,8 @@ class Storage(context: Context) {
         private const val PREFS_NAME_LAST_TRIGGERED_SCHEDULE_DAY = "PREFS_NAME_LAST_TRIGGERED_SCHEDULE_DAY"
         private const val PREFS_NAME_LAST_TRIGGERED_SCHEDULE_HOUR = "PREFS_NAME_LAST_TRIGGERED_SCHEDULE_HOUR"
         private const val PREFS_NAME_KEEP_AWAKE = "PREFS_NAME_KEEP_AWAKE"
+        private const val PREFS_NAME_NETWORKS_THRESHOLD = "PREFS_NAME_NETWORKS_THRESHOLD"
+        private const val PREFS_NAME_SCAN_MODE = "PREFS_NAME_SCAN_MODE"
         private const val DELAY_VALUE_DEFAULT = 1
     }
 }

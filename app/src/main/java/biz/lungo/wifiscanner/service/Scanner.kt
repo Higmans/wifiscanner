@@ -1,22 +1,29 @@
 package biz.lungo.wifiscanner.service
 
 import android.annotation.SuppressLint
+import android.app.Service.RECEIVER_NOT_EXPORTED
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
+import android.os.BatteryManager
 import android.widget.Toast
+import biz.lungo.wifiscanner.BuildConfig
+import biz.lungo.wifiscanner.data.ScanMode
 import biz.lungo.wifiscanner.data.Status
 import biz.lungo.wifiscanner.data.Storage
 import biz.lungo.wifiscanner.data.WiFi
+import biz.lungo.wifiscanner.network.WebhookApi
 import biz.lungo.wifiscanner.util.tickerFlow
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import retrofit2.Retrofit
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 @Suppress("DEPRECATION")
@@ -25,12 +32,23 @@ class Scanner(private val context: Context) {
     private var scansPerTwoMinutes = ConcurrentHashMap.newKeySet<Long>()
     private val subscribers = mutableSetOf<OnStateChangedListener>()
     private var job: Job? = null
+    private var webhookJob: Job? = null
     private var retryCount = 0
-    private var shouldRetry = false
+    private var singleScan = false
     private val storage = Storage(context)
     private val wifiScanReceiver: BroadcastReceiver
+    private var powerReceiver: BroadcastReceiver? = null
     private val wifiManager: WifiManager
         get() = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
+
+    var isScanning: Boolean = false
+        private set
+
+    // Webhook setup for Home Assistant
+    private val webhookRetrofit = Retrofit.Builder()
+        .baseUrl(BuildConfig.WEBHOOK_BASE_URL)
+        .build()
+    private val webhookApi = webhookRetrofit.create(WebhookApi::class.java)
 
     init {
         wifiScanReceiver = object : BroadcastReceiver() {
@@ -52,17 +70,39 @@ class Scanner(private val context: Context) {
             }
             scansPerTwoMinutes.removeAll(outdatedScans)
         }.launchIn(CoroutineScope(Dispatchers.Default))
+
+        val intentFilter = IntentFilter().apply {
+            addAction("android.intent.action.ACTION_POWER_CONNECTED")
+            addAction("android.intent.action.ACTION_POWER_DISCONNECTED")
+        }
+        powerReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == Intent.ACTION_POWER_DISCONNECTED) {
+                    onPowerStateChanged(false)
+                } else if (intent.action == Intent.ACTION_POWER_CONNECTED) {
+                    onPowerStateChanged(true)
+                }
+            }
+        }
+        context.registerReceiver(powerReceiver, intentFilter, RECEIVER_NOT_EXPORTED)
     }
 
     @SuppressLint("MissingPermission")
     private fun scanSuccess() {
         val results = wifiManager.scanResults
+            .filter { result -> result.SSID.isNotBlank() }
+            .map { result -> result.toWiFi() }
+            .sortedByDescending { result ->  result.level }
         val trackedNetworks = storage.getNetworks()
-        val hasTargetWifi = trackedNetworks.isEmpty() || results.any { it.toWiFi() in trackedNetworks }
+        val hasTargetWifi = trackedNetworks.isEmpty() || results.any { it in trackedNetworks }
         val lastStatus = storage.getLastStatus()
-        val currentStatus = hasTargetWifi.toStatus()
+        val currentStatus: Status = when (storage.getScanMode()) {
+            ScanMode.Network,
+            ScanMode.Hybrid -> hasTargetWifi.toStatus()
+            ScanMode.Power -> lastStatus ?: Status.Online(LocalDateTime.now())
+        }
         subscribers.forEach { it.onScanComplete() }
-        if (shouldRetry && currentStatus is Status.Offline && lastStatus !is Status.Offline && retryCount++ < RETRY_COUNT_MAX) {
+        if (!singleScan && currentStatus is Status.Offline && lastStatus !is Status.Offline && retryCount++ < RETRY_COUNT_MAX) {
             if (!isThrottled()) {
                 startScan()
             }
@@ -70,17 +110,26 @@ class Scanner(private val context: Context) {
         }
         retryCount = 0
         if (lastStatus?.state != currentStatus.state) {
+            if (storage.getScanMode() == ScanMode.Hybrid && currentStatus is Status.Online && lastStatus is Status.Offline) {
+                // Only stop WiFi scanning if phone is actually charging
+                if (hasPower()) {
+                    stopNetworkScanning()
+                    stopWebhookTimer()
+                } else {
+                    // Online but not charging - start webhook timer
+                    startWebhookTimer()
+                }
+            }
+            if (currentStatus is Status.Offline) {
+                stopWebhookTimer()
+            }
             storage.setLastStatus(currentStatus)
             subscribers.forEach {
                 it.onStateChanged(currentStatus, lastStatus?.since)
             }
         }
         subscribers.forEach {
-            it.onNetworksReceived(
-                results.filter { result -> result.SSID.isNotBlank() }
-                    .map { result -> result.toWiFi() }
-                    .sortedByDescending { result ->  result.level }
-            )
+            it.onNetworksReceived(results)
         }
     }
 
@@ -95,16 +144,32 @@ class Scanner(private val context: Context) {
 
     private fun Int.validate() = if (this == 0) -100 else this
 
-    private fun isAndroidLowerThanR() =
-        android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R
+    fun startScanning() {
+        isScanning = true
+        when (storage.getScanMode()) {
+            ScanMode.Network -> startNetworkScanning()
+            ScanMode.Hybrid -> {
+                if (storage.getLastStatus() is Status.Offline) {
+                    startNetworkScanning()
+                } else if (storage.getLastStatus() is Status.Online && !hasPower()) {
+                    // Online but not charging - continue WiFi scanning and start webhook timer
+                    startNetworkScanning()
+                    startWebhookTimer()
+                }
+            }
+            ScanMode.Power -> {
+                // no-op
+            }
+        }
+    }
 
-    fun startScanning(scanPeriodMinutes: Int) {
-        registerReceiver()
-        shouldRetry = true
+    private fun startNetworkScanning() {
+        registerNetworkReceiver()
+        singleScan = false
         job = tickerFlow(5.seconds)
             .map { LocalDateTime.now() }
             .distinctUntilChanged { old, new ->
-                new.minute - old.minute < scanPeriodMinutes && new.hour == old.hour
+                new.minute - old.minute < storage.getDelayValue() && new.hour == old.hour
             }
             .onEach {
                 if (isThrottled()) {
@@ -122,8 +187,8 @@ class Scanner(private val context: Context) {
     }
 
     fun scanOnce() {
-        registerReceiver()
-        shouldRetry = false
+        if (!isScanning) registerNetworkReceiver()
+        singleScan = true
         if (isThrottled()) {
             subscribers.forEach { it.onScanThrottled() }
             return
@@ -134,13 +199,80 @@ class Scanner(private val context: Context) {
         }
     }
 
+    fun onPowerStateChanged(hasPower: Boolean, singleScan: Boolean = false) {
+        if (isScanning || singleScan) {
+            val lastStatus = storage.getLastStatus()
+            when (storage.getScanMode()) {
+                ScanMode.Network -> {
+                    if (!hasPower || singleScan) {
+                        scanOnce()
+                    }
+                }
+                ScanMode.Power -> {
+                    val currentStatus = hasPower.toStatus()
+                    if (currentStatus is Status.Offline) {
+                        verifyPowerState(lastStatus, false)
+                    } else if (lastStatus?.state != currentStatus.state) {
+                        storage.setLastStatus(currentStatus)
+                        subscribers.forEach {
+                            it.onStateChanged(currentStatus, lastStatus?.since)
+                        }
+                    }
+                }
+                ScanMode.Hybrid -> {
+                    if (lastStatus is Status.Online && hasPower.toStatus() is Status.Offline) {
+                        val currentStatus = hasPower.toStatus()
+                        if (currentStatus is Status.Offline) {
+                            verifyPowerState(lastStatus, !singleScan)
+                        }
+                    } else if (hasPower && lastStatus is Status.Online && job != null) {
+                        // Power connected while Online - stop WiFi scanning and webhook timer
+                        stopNetworkScanning()
+                        stopWebhookTimer()
+                    } else if (singleScan) {
+                        scanOnce()
+                    }
+                }
+            }
+        }
+        Toast.makeText(context, "Power ${if (!hasPower) "dis" else ""}connected", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun verifyPowerState(lastStatus: Status?, startNetworkScanning: Boolean) {
+        flow {
+            delay(3.seconds)
+            val currentStatus = hasPower().toStatus()
+            if (lastStatus?.state != currentStatus.state && currentStatus is Status.Offline) {
+                // Power confirmed offline - verify with WiFi scan before transitioning
+                if (startNetworkScanning) {
+                    startNetworkScanning()
+                }
+                // Perform a WiFi scan to verify - scanSuccess() will handle state transition
+                scanOnce()
+            }
+            emit(Unit)
+        }.launchIn(CoroutineScope(Dispatchers.Main))
+    }
+
+    fun hasPower(): Boolean {
+        val batteryStatus: Intent? = IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { iFilter ->
+            context.registerReceiver(null, iFilter)
+        }
+        val status: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val isCharging: Boolean = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        val chargePlug: Int = batteryStatus?.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1) ?: -1
+        val usbCharge: Boolean = chargePlug == BatteryManager.BATTERY_PLUGGED_USB
+        val acCharge: Boolean = chargePlug == BatteryManager.BATTERY_PLUGGED_AC
+        return isCharging || usbCharge || acCharge
+    }
+
     private fun startScan(): Boolean {
         val now = LocalDateTime.now().atZone(ZoneId.systemDefault()).toEpochSecond()
         scansPerTwoMinutes.add(now)
         return wifiManager.startScan()
     }
 
-    private fun registerReceiver() {
+    private fun registerNetworkReceiver() {
         try {
             context.registerReceiver(wifiScanReceiver, IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION))
         } catch (e: Exception) {
@@ -148,19 +280,22 @@ class Scanner(private val context: Context) {
         }
     }
 
-    private fun isThrottled() = scansPerTwoMinutes.size >= 4 && (isAndroidLowerThanR() || wifiManager.isScanThrottleEnabled)
+    private fun isThrottled() = scansPerTwoMinutes.size >= 4 && wifiManager.isScanThrottleEnabled
 
     fun stopScanning() {
+        stopNetworkScanning()
+        isScanning = false
+    }
+
+    private fun stopNetworkScanning() {
         try {
-            context.unregisterReceiver(wifiScanReceiver)
+            if (isScanning) context.unregisterReceiver(wifiScanReceiver)
         } catch (e: Exception) {
             Toast.makeText(context, "Unable to unregister Wi-Fi receiver", Toast.LENGTH_SHORT).show()
         }
         job?.cancel()
         job = null
     }
-
-    fun isScanning() = job != null
 
     fun subscribe(listener: OnStateChangedListener) {
         subscribers.add(listener)
@@ -175,6 +310,29 @@ class Scanner(private val context: Context) {
 
     companion object {
         private const val RETRY_COUNT_MAX = 3
+    }
+
+    private fun startWebhookTimer() {
+        if (webhookJob != null) return // Already running
+        webhookJob = tickerFlow(3.minutes)
+            .onEach {
+                // Only send if still in Hybrid mode, Online, and not charging
+                if (storage.getScanMode() == ScanMode.Hybrid &&
+                    storage.getLastStatus() is Status.Online &&
+                    !hasPower()) {
+                    try {
+                        webhookApi.notifyPowerOnline(BuildConfig.WEBHOOK_ID)
+                    } catch (e: Exception) {
+                        // Silently ignore webhook failures
+                    }
+                }
+            }
+            .launchIn(CoroutineScope(Dispatchers.IO))
+    }
+
+    private fun stopWebhookTimer() {
+        webhookJob?.cancel()
+        webhookJob = null
     }
 
     interface OnStateChangedListener {

@@ -23,8 +23,10 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 
-class Bot(private val botApiKey: String?, private val botChatId: Long?) :
+class Bot(private val botApiKey: String?, private val botChatId: Long?, private val adminChatId: Long?) :
     Scanner.OnStateChangedListener, Scheduler.ScheduleListener {
+
+    private val scheduler by lazy { WiFiScannerApplication.instance.scheduler }
 
     var isBotEnabled = botApiKey != null && botChatId != null
     var shouldSendMessage = isBotEnabled
@@ -41,9 +43,9 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
         set(value) {
             field = value && isBotEnabled
             if (field) {
-                WiFiScannerApplication.instance.scheduler.subscribe(this)
+                scheduler.subscribe(this)
             } else {
-                WiFiScannerApplication.instance.scheduler.unsubscribe(this)
+                scheduler.unsubscribe(this)
             }
         }
 
@@ -74,18 +76,41 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
         }.launchIn(CoroutineScope(Dispatchers.Default))
     }
 
+    private fun sendPrivateMessage(message: String) {
+        if (botApiKey == null || adminChatId == null) {
+            throw java.lang.RuntimeException("Bot is not configured")
+        }
+        flow {
+            botApiService.sendMessage(botApiKey, MessageRequest(adminChatId, message, ParseMode.HTML.value))
+            emit(Unit)
+        }.retryWhen { cause, attempt ->
+            Log.e("Bot", "Failed to send message: $message", cause)
+            delay(RETRY_DELAY)
+            attempt < MAX_RETRY_COUNT
+        }.catch {
+            Log.e("Bot", "Failed to send message: $message", it)
+        }.launchIn(CoroutineScope(Dispatchers.Default))
+    }
+
     private fun formatBlackoutMessage(status: Status, lastStatusTime: LocalDateTime?): String {
         return when (status) {
             is Online -> {
                 val humanDuration = formatHumanDuration(status.since, lastStatusTime)
                 val readableSince = humanDuration?.let { "${br}Його не було $it" } ?: ""
-                "<b>Світло є!</b> \uD83D\uDCA1$readableSince"
+//                val nextBlackoutString = scheduler.nextScheduledBlackout.toJavaLocalDateTime().toNextBlackoutString()
+                val nextBlackoutString = ""
+                "<b>Світло є!</b> \uD83D\uDCA1$readableSince$nextBlackoutString"
             }
             is Offline -> {
                 "Світло відключили... ❌"
             }
         }
     }
+
+    private fun LocalDateTime.toNextBlackoutString() =
+        "${br}Наступне ймовірне відключення - ${this.dayOfMonth.asString()}.${this.monthValue.asString()} ${this.hour.asString()}:${this.minute.asString()}"
+
+    private fun Int.asString() = if (this < 10) "0$this" else this.toString()
 
     private fun formatReminderMessage(minutesUntil: Long) =
         "⌛ Можливе відключення світла за графіком через $minutesUntil хв."
@@ -118,7 +143,11 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?) :
     }
 
     override fun onNetworksReceived(networks: List<WiFi>) {
-        // no-op
+        val threshold = storage.getNetworksThreshold()
+        val filtered = networks.map { WiFi(it.name, it.level) }.toSet()
+        if (filtered.size >= threshold && storage.getLastStatus() is Offline) {
+            sendPrivateMessage("Check power, networks available: ${filtered.size}")
+        }
     }
 
     override fun onSchedule(diffMinutes: Long) {

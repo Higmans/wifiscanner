@@ -1,5 +1,6 @@
 package biz.lungo.wifiscanner.service
 
+import android.util.Log
 import biz.lungo.wifiscanner.data.Storage
 import biz.lungo.wifiscanner.util.tickerFlow
 import kotlinx.coroutines.CoroutineScope
@@ -18,7 +19,11 @@ class Scheduler(private val storage: Storage) {
         private set
 
     init {
-        updateNextScheduled(Clock.System.now())
+        try {
+            updateNextScheduled(Clock.System.now())
+        } catch (e: Exception) {
+            Log.w("Scheduler", "Unable to perform updateNextScheduled(): ${e.message ?: "no message"}")
+        }
     }
 
     fun start() {
@@ -48,7 +53,12 @@ class Scheduler(private val storage: Storage) {
 
     private fun checkTime() {
         val now = Clock.System.now()
-        updateNextScheduled(now)
+        try {
+            updateNextScheduled(now)
+        } catch (e: Exception) {
+            Log.w("Scheduler", "Unable to perform updateNextScheduled(): ${e.message ?: "no message"}")
+            return
+        }
         val diff = now.until(
             nextScheduledBlackout.toInstant(TimeZone.currentSystemDefault()),
             DateTimeUnit.MINUTE
@@ -107,13 +117,13 @@ class Scheduler(private val storage: Storage) {
     }
 
     sealed class Day(val dow: DayOfWeek, val times: List<Int>, val next: Day) {
-        object Monday : Day(DayOfWeek.MONDAY, listOf(0, 9, 18), Tuesday)
-        object Tuesday : Day(DayOfWeek.TUESDAY, listOf(3, 12, 21), Wednesday)
-        object Wednesday : Day(DayOfWeek.WEDNESDAY, listOf(6, 15), Thursday)
-        object Thursday : Day(DayOfWeek.THURSDAY, listOf(0, 9, 18), Friday)
-        object Friday : Day(DayOfWeek.FRIDAY, listOf(3, 12, 21), Saturday)
-        object Saturday : Day(DayOfWeek.SATURDAY, listOf(6, 15), Sunday)
-        object Sunday : Day(DayOfWeek.SUNDAY, listOf(0, 9, 18), Monday)
+        object Monday : Day(DayOfWeek.MONDAY, listOf(7, 16), Tuesday)
+        object Tuesday : Day(DayOfWeek.TUESDAY, listOf(1, 10, 19), Wednesday)
+        object Wednesday : Day(DayOfWeek.WEDNESDAY, listOf(4, 13, 22), Thursday)
+        object Thursday : Day(DayOfWeek.THURSDAY, listOf(7, 16), Friday)
+        object Friday : Day(DayOfWeek.FRIDAY, listOf(1, 10, 19), Saturday)
+        object Saturday : Day(DayOfWeek.SATURDAY, listOf(4, 13, 22), Sunday)
+        object Sunday : Day(DayOfWeek.SUNDAY, listOf(5, 13, 22), Monday)
     }
 
     data class TriggeredSchedule(val day: Day, val hour: Int)

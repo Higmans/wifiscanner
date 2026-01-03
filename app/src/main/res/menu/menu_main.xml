@@ -9,4 +9,10 @@
         app:actionViewClass="android.widget.CheckBox"
         app:showAsAction="ifRoom|withText" />
 
+    <item
+        android:id="@+id/spinnerScanMode"
+        android:title="@string/scan_mode"
+        app:actionViewClass="android.widget.Spinner"
+        app:showAsAction="ifRoom|withText" />
+
 </menu>
