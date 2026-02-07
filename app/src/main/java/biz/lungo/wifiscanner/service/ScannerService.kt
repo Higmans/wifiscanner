@@ -6,9 +6,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import biz.lungo.wifiscanner.R
 import biz.lungo.wifiscanner.WiFiScannerApplication
@@ -23,6 +25,7 @@ class ScannerService : Service() {
         get() = WiFiScannerApplication.instance.scanner
     private var powerReceiver: BroadcastReceiver? = null
     private val storage by lazy { Storage(this) }
+    private var wakeLock: PowerManager.WakeLock? = null
 
     private val binder: ScannerServiceBinder by lazy {
         ScannerServiceBinder()
@@ -31,6 +34,15 @@ class ScannerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createNotificationChannel()
         startForeground(1, getNotification(storage.getScanMode()))
+
+        // Acquire partial wake lock to keep CPU running when screen is off
+        if (wakeLock == null) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WiFiScanner::ScannerService")
+            wakeLock?.acquire()
+        }
+
+        storage.setServiceRunning(true)
         scanner.startScanning()
         return START_STICKY
     }
@@ -87,7 +99,15 @@ class ScannerService : Service() {
         manager.createNotificationChannel(serviceChannel)
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val restartIntent = Intent(this, ScannerService::class.java)
+        startForegroundService(restartIntent)
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
         powerReceiver?.let { unregisterReceiver(it) }
         scanner.stopScanning()
         super.onDestroy()

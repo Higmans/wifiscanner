@@ -45,6 +45,8 @@ class Scanner(private val context: Context) {
     private val wifiManager: WifiManager
         get() = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
+    private var wifiLock: WifiManager.WifiLock? = null
+
     var isScanning: Boolean = false
         private set
 
@@ -153,8 +155,22 @@ class Scanner(private val context: Context) {
 
     private fun Int.validate() = if (this == 0) -100 else this
 
+    @Suppress("DEPRECATION")
+    private fun acquireWifiLock() {
+        if (wifiLock == null) {
+            wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "WiFiScanner::ScanLock")
+        }
+        wifiLock?.let { if (!it.isHeld) it.acquire() }
+    }
+
+    private fun releaseWifiLock() {
+        wifiLock?.let { if (it.isHeld) it.release() }
+        wifiLock = null
+    }
+
     fun startScanning() {
         isScanning = true
+        acquireWifiLock()
         when (storage.getScanMode()) {
             ScanMode.Network -> startNetworkScanning()
             ScanMode.Hybrid -> {
@@ -327,6 +343,7 @@ class Scanner(private val context: Context) {
     fun stopScanning() {
         stopNetworkScanning()
         stopWebhookTimer()
+        releaseWifiLock()
         isScanning = false
     }
 

@@ -5,8 +5,11 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.BatteryManager
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.text.Editable
 import android.text.Spannable
 import android.text.SpannableString
@@ -159,12 +162,29 @@ class MainActivity : AppCompatActivity(),
                 storage.setNetworksThreshold(text.toString().toIntOrNull() ?: 10)
             }
         }
-        if (hasLocationPermission()) {
+        requestBatteryOptimizationExemption()
+
+        // Restore UI or restart service if it was running
+        if (storage.getServiceRunning()) {
+            if (!scanner.isScanning) {
+                // Process was killed -- restart the service
+                startService(scannerServiceIntent)
+            }
+            // Either way, reflect the active scanning state in the UI
+            with(binding) {
+                btnScan.text = getString(R.string.stop_scan)
+                slider.isEnabled = false
+                btnScanOnce.isEnabled = false
+                scanModeSpinner?.isEnabled = false
+            }
+            bot.shouldSendMessage = storage.getSendMessageChecked()
+        } else if (hasLocationPermission()) {
             binding.btnScanOnce.performClick()
         }
     }
 
     private fun ActivityMainBinding.stopScanning() {
+        storage.setServiceRunning(false)
         stopService(scannerServiceIntent)
         slider.isEnabled = true
         btnScan.text = getString(R.string.start_scan)
@@ -230,6 +250,17 @@ class MainActivity : AppCompatActivity(),
 
     private fun hasLocationPermission() =
         checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    @SuppressLint("BatteryLife")
+    private fun requestBatteryOptimizationExemption() {
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        }
+    }
 
     override fun onDestroy() {
         super.onDestroy()

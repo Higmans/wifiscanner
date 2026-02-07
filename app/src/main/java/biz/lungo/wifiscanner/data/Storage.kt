@@ -99,6 +99,14 @@ class Storage(context: Context) {
 
     fun getScanMode() = ScanMode.fromString(sharedPreferences.getString(PREFS_NAME_SCAN_MODE, null))
 
+    fun setServiceRunning(running: Boolean) {
+        sharedPreferences.edit {
+            putBoolean(PREFS_NAME_SERVICE_RUNNING, running)
+        }
+    }
+
+    fun getServiceRunning() = sharedPreferences.getBoolean(PREFS_NAME_SERVICE_RUNNING, false)
+
     fun getNetworksThreshold() =  sharedPreferences.getInt(PREFS_NAME_NETWORKS_THRESHOLD, 10)
 
     fun setNetworksThreshold(threshold: Int) {
@@ -130,6 +138,7 @@ class Storage(context: Context) {
         private const val PREFS_NAME_KEEP_AWAKE = "PREFS_NAME_KEEP_AWAKE"
         private const val PREFS_NAME_NETWORKS_THRESHOLD = "PREFS_NAME_NETWORKS_THRESHOLD"
         private const val PREFS_NAME_SCAN_MODE = "PREFS_NAME_SCAN_MODE"
+        private const val PREFS_NAME_SERVICE_RUNNING = "PREFS_NAME_SERVICE_RUNNING"
         private const val DELAY_VALUE_DEFAULT = 1
     }
 }
