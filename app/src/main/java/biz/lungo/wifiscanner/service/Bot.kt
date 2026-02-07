@@ -1,16 +1,15 @@
 package biz.lungo.wifiscanner.service
 
 import android.util.Log
-import biz.lungo.wifiscanner.*
+import biz.lungo.wifiscanner.MessageRequest
+import biz.lungo.wifiscanner.ParseMode
 import biz.lungo.wifiscanner.data.Status
 import biz.lungo.wifiscanner.data.Status.*
 import biz.lungo.wifiscanner.data.Storage
 import biz.lungo.wifiscanner.data.UkrainianDictionary
 import biz.lungo.wifiscanner.data.WiFi
 import biz.lungo.wifiscanner.network.BotApi
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
@@ -23,19 +22,25 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 
-class Bot(private val botApiKey: String?, private val botChatId: Long?, private val adminChatId: Long?) :
-    Scanner.OnStateChangedListener, Scheduler.ScheduleListener {
+class Bot(
+    private val botApiKey: String?,
+    private val botChatId: Long?,
+    private val adminChatId: Long?,
+    private val scanner: Scanner,
+    private val scheduler: Scheduler,
+    private val storage: Storage
+) : Scanner.OnStateChangedListener, Scheduler.ScheduleListener {
 
-    private val scheduler by lazy { WiFiScannerApplication.instance.scheduler }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     var isBotEnabled = botApiKey != null && botChatId != null
     var shouldSendMessage = isBotEnabled
         set(value) {
             field = value && isBotEnabled
             if (field) {
-                WiFiScannerApplication.instance.scanner.subscribe(this)
+                scanner.subscribe(this)
             } else {
-                WiFiScannerApplication.instance.scanner.unsubscribe(this)
+                scanner.unsubscribe(this)
             }
         }
 
@@ -58,7 +63,6 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?, private 
         .addConverterFactory(GsonConverterFactory.create())
         .build()
     private val botApiService = retrofit.create(BotApi::class.java)
-    private val storage by lazy { Storage(WiFiScannerApplication.instance) }
 
     private fun sendMessage(message: String) {
         if (botApiKey == null || botChatId == null) {
@@ -73,7 +77,7 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?, private 
             attempt < MAX_RETRY_COUNT
         }.catch {
             Log.e("Bot", "Failed to send message: $message", it)
-        }.launchIn(CoroutineScope(Dispatchers.Default))
+        }.launchIn(scope)
     }
 
     private fun sendPrivateMessage(message: String) {
@@ -89,7 +93,7 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?, private 
             attempt < MAX_RETRY_COUNT
         }.catch {
             Log.e("Bot", "Failed to send message: $message", it)
-        }.launchIn(CoroutineScope(Dispatchers.Default))
+        }.launchIn(scope)
     }
 
     private fun formatBlackoutMessage(status: Status, lastStatusTime: LocalDateTime?): String {
@@ -158,6 +162,10 @@ class Bot(private val botApiKey: String?, private val botChatId: Long?, private 
 
     override fun onNextBlackoutUpdated(nextBlackout: LocalDateTime) {
         // no-op
+    }
+
+    fun destroy() {
+        scope.cancel()
     }
 
     companion object {

@@ -15,14 +15,13 @@ class WiFiScannerApplication : Application() {
 
     private val adminChatId = BuildConfig.ADMIN_CHAT_ID.toLongOrNull()
 
-    val bot: Bot by lazy { Bot(botApiKey, botChatId, adminChatId) }
     val scanner: Scanner by lazy { Scanner(this) }
     val scheduler: Scheduler by lazy { Scheduler(Storage(this)) }
+    val bot: Bot by lazy { Bot(botApiKey, botChatId, adminChatId, scanner, scheduler, Storage(this)) }
 
     override fun onCreate() {
         super.onCreate()
         instance = this
-        scheduler.start()
     }
 
     companion object {

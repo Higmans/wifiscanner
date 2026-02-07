@@ -3,6 +3,17 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+ext {
+    localProps = new Properties()
+    localProps.load(project.rootProject.file('local.properties').newDataInputStream())
+}
+
+def getBotApiKey() { return ext.localProps.getProperty("bot.api.key") }
+def getChatId() { return ext.localProps.getProperty("chat.id") }
+def getAdminChatId() { return ext.localProps.getProperty("admin.chat.id") }
+def getWebhookBaseUrl() { return ext.localProps.getProperty("webhook.base.url") ?: "" }
+def getWebhookId() { return ext.localProps.getProperty("webhook.id") ?: "" }
+
 android {
 
     allprojects {
@@ -19,7 +30,7 @@ android {
     defaultConfig {
         applicationId "biz.lungo.wifiscanner"
         minSdk 33
-        targetSdk 33
+        targetSdk 34
         versionCode 1
         versionName "1.0"
 
@@ -49,36 +60,6 @@ android {
         dataBinding true
         buildConfig true
     }
-}
-
-def getBotApiKey() {
-    Properties properties = new Properties()
-    properties.load(project.rootProject.file('local.properties').newDataInputStream())
-    return properties.getProperty("bot.api.key")
-}
-
-def getChatId() {
-    Properties properties = new Properties()
-    properties.load(project.rootProject.file('local.properties').newDataInputStream())
-    return properties.getProperty("chat.id")
-}
-
-def getAdminChatId() {
-    Properties properties = new Properties()
-    properties.load(project.rootProject.file('local.properties').newDataInputStream())
-    return properties.getProperty("admin.chat.id")
-}
-
-def getWebhookBaseUrl() {
-    Properties properties = new Properties()
-    properties.load(project.rootProject.file('local.properties').newDataInputStream())
-    return properties.getProperty("webhook.base.url") ?: ""
-}
-
-def getWebhookId() {
-    Properties properties = new Properties()
-    properties.load(project.rootProject.file('local.properties').newDataInputStream())
-    return properties.getProperty("webhook.id") ?: ""
 }
 
 dependencies {

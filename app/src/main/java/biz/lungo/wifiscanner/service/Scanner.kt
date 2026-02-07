@@ -27,13 +27,16 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
+// Suppression kept for WifiManager.startScan() which is deprecated but has no replacement for on-demand scanning
 @Suppress("DEPRECATION")
 class Scanner(private val context: Context) {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var scansPerTwoMinutes = ConcurrentHashMap.newKeySet<Long>()
-    private val subscribers = mutableSetOf<OnStateChangedListener>()
+    private val subscribers = ConcurrentHashMap.newKeySet<OnStateChangedListener>()
     private var job: Job? = null
     private var webhookJob: Job? = null
+    private var isReceiverRegistered = false
     private var retryCount = 0
     private var singleScan = false
     private val storage = Storage(context)
@@ -70,11 +73,11 @@ class Scanner(private val context: Context) {
                 }
             }
             scansPerTwoMinutes.removeAll(outdatedScans)
-        }.launchIn(CoroutineScope(Dispatchers.Default))
+        }.launchIn(scope)
 
         val intentFilter = IntentFilter().apply {
-            addAction("android.intent.action.ACTION_POWER_CONNECTED")
-            addAction("android.intent.action.ACTION_POWER_DISCONNECTED")
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
         }
         powerReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
@@ -91,7 +94,7 @@ class Scanner(private val context: Context) {
     @SuppressLint("MissingPermission")
     private fun scanSuccess() {
         val results = wifiManager.scanResults
-            .filter { result -> result.SSID.isNotBlank() }
+            .filter { result -> result.wifiSsid != null && result.wifiSsid.toString().removeSurrounding("\"").isNotBlank() }
             .map { result -> result.toWiFi() }
             .sortedByDescending { result ->  result.level }
         val trackedNetworks = storage.getNetworks()
@@ -136,7 +139,10 @@ class Scanner(private val context: Context) {
         }
     }
 
-    private fun ScanResult.toWiFi() = WiFi(SSID, level.validate())
+    private fun ScanResult.toWiFi(): WiFi {
+        val ssid = wifiSsid?.toString()?.removeSurrounding("\"") ?: ""
+        return WiFi(ssid, level.validate())
+    }
 
     private fun Boolean.toStatus() =
         if (this) {
@@ -186,7 +192,7 @@ class Scanner(private val context: Context) {
                     }
                 }
             }
-            .launchIn(CoroutineScope(Dispatchers.Default))
+            .launchIn(scope)
     }
 
     fun scanOnce() {
@@ -214,7 +220,8 @@ class Scanner(private val context: Context) {
                 ScanMode.Power -> {
                     val currentStatus = hasPower.toStatus()
                     if (currentStatus is Status.Offline) {
-                        verifyPowerState(lastStatus, false)
+                        // Verify power state after a delay to avoid false triggers
+                        verifyPowerStateForPowerMode(lastStatus)
                     } else if (lastStatus?.state != currentStatus.state) {
                         storage.setLastStatus(currentStatus)
                         subscribers.forEach {
@@ -242,31 +249,49 @@ class Scanner(private val context: Context) {
     }
 
     private fun verifyPowerState(lastStatus: Status?, startNetworkScanning: Boolean) {
-        flow {
+        scope.launch {
             delay(3.seconds)
             val currentStatus = hasPower().toStatus()
             if (lastStatus?.state != currentStatus.state && currentStatus is Status.Offline) {
-                // Power confirmed offline - verify with WiFi scan before transitioning
-                if (startNetworkScanning) {
-                    startNetworkScanning()
+                withContext(Dispatchers.Main) {
+                    // Power confirmed offline - verify with WiFi scan before transitioning
+                    if (startNetworkScanning) {
+                        startNetworkScanning()
+                    }
+                    // Start webhook timer in Hybrid mode (will be stopped if status goes Offline)
+                    if (storage.getScanMode() == ScanMode.Hybrid) {
+                        startWebhookTimer()
+                    }
+                    // Perform a WiFi scan to verify - scanSuccess() will handle state transition
+                    scanOnce()
                 }
-                // Start webhook timer in Hybrid mode (will be stopped if status goes Offline)
-                if (storage.getScanMode() == ScanMode.Hybrid) {
-                    startWebhookTimer()
-                }
-                // Perform a WiFi scan to verify - scanSuccess() will handle state transition
-                scanOnce()
             } else if (storage.getScanMode() == ScanMode.Hybrid &&
                        lastStatus is Status.Online &&
                        !hasPower()) {
-                // Power still offline while Online - start webhook timer
-                startWebhookTimer()
-                if (startNetworkScanning && job == null) {
-                    startNetworkScanning()
+                withContext(Dispatchers.Main) {
+                    // Power still offline while Online - start webhook timer
+                    startWebhookTimer()
+                    if (startNetworkScanning && job == null) {
+                        startNetworkScanning()
+                    }
                 }
             }
-            emit(Unit)
-        }.launchIn(CoroutineScope(Dispatchers.Main))
+        }
+    }
+
+    private fun verifyPowerStateForPowerMode(lastStatus: Status?) {
+        scope.launch {
+            delay(3.seconds)
+            val currentStatus = hasPower().toStatus()
+            if (lastStatus?.state != currentStatus.state) {
+                storage.setLastStatus(currentStatus)
+                withContext(Dispatchers.Main) {
+                    subscribers.forEach {
+                        it.onStateChanged(currentStatus, lastStatus?.since)
+                    }
+                }
+            }
+        }
     }
 
     fun hasPower(): Boolean {
@@ -288,8 +313,10 @@ class Scanner(private val context: Context) {
     }
 
     private fun registerNetworkReceiver() {
+        if (isReceiverRegistered) return
         try {
             context.registerReceiver(wifiScanReceiver, IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION))
+            isReceiverRegistered = true
         } catch (e: Exception) {
             Toast.makeText(context, "Unable to register Wi-Fi receiver", Toast.LENGTH_SHORT).show()
         }
@@ -299,14 +326,26 @@ class Scanner(private val context: Context) {
 
     fun stopScanning() {
         stopNetworkScanning()
+        stopWebhookTimer()
         isScanning = false
     }
 
-    private fun stopNetworkScanning() {
+    fun destroy() {
+        stopScanning()
+        scope.cancel()
         try {
-            if (isScanning) context.unregisterReceiver(wifiScanReceiver)
-        } catch (e: Exception) {
-            Toast.makeText(context, "Unable to unregister Wi-Fi receiver", Toast.LENGTH_SHORT).show()
+            powerReceiver?.let { context.unregisterReceiver(it) }
+        } catch (_: Exception) { }
+    }
+
+    private fun stopNetworkScanning() {
+        if (isReceiverRegistered) {
+            try {
+                context.unregisterReceiver(wifiScanReceiver)
+            } catch (e: Exception) {
+                Toast.makeText(context, "Unable to unregister Wi-Fi receiver", Toast.LENGTH_SHORT).show()
+            }
+            isReceiverRegistered = false
         }
         job?.cancel()
         job = null
@@ -349,7 +388,7 @@ class Scanner(private val context: Context) {
                     }
                 }
             }
-            .launchIn(CoroutineScope(Dispatchers.IO))
+            .launchIn(scope)
     }
 
     private fun stopWebhookTimer() {

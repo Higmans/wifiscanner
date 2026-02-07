@@ -3,18 +3,18 @@ package biz.lungo.wifiscanner.service
 import android.util.Log
 import biz.lungo.wifiscanner.data.Storage
 import biz.lungo.wifiscanner.util.tickerFlow
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.datetime.*
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.minutes
 
 class Scheduler(private val storage: Storage) {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
-    private val subscribers = mutableSetOf<ScheduleListener>()
+    private val subscribers = ConcurrentHashMap.newKeySet<ScheduleListener>()
     var nextScheduledBlackout = Instant.fromEpochMilliseconds(0).toLocalDateTime(TimeZone.currentSystemDefault())
         private set
 
@@ -29,7 +29,7 @@ class Scheduler(private val storage: Storage) {
     fun start() {
         job = tickerFlow(1.minutes).onEach {
             checkTime()
-        }.launchIn(CoroutineScope(Dispatchers.Default))
+        }.launchIn(scope)
     }
 
     private fun stop() {
@@ -49,6 +49,11 @@ class Scheduler(private val storage: Storage) {
         if (subscribers.isEmpty()) {
             stop()
         }
+    }
+
+    fun destroy() {
+        stop()
+        scope.cancel()
     }
 
     private fun checkTime() {
