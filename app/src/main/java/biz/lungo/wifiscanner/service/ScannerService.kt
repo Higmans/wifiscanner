@@ -72,21 +72,18 @@ class ScannerService : Service() {
         get() = when (this) {
             ScanMode.Network -> "Network Scanner Service"
             ScanMode.Power -> "Power Scanner Service"
-            ScanMode.Hybrid -> "Hybrid Scanner Service"
         }
 
-    @Suppress("RecursivePropertyAccessor")
     private val ScanMode.notificationSubtitle: String
         get() = when (this) {
-            ScanMode.Network -> "Scanning for networks"
-            ScanMode.Power -> "Observing power state"
-            ScanMode.Hybrid -> {
+            ScanMode.Network -> {
                 if (storage.getLastStatus() is Status.Online) {
-                    ScanMode.Power.notificationSubtitle
+                    "Observing power state"
                 } else {
-                    ScanMode.Network.notificationSubtitle
+                    "Scanning for networks"
                 }
             }
+            ScanMode.Power -> "Observing power state"
         }
 
     private fun createNotificationChannel() {

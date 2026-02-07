@@ -103,8 +103,7 @@ class Scanner(private val context: Context) {
         val hasTargetWifi = trackedNetworks.isEmpty() || results.any { it in trackedNetworks }
         val lastStatus = storage.getLastStatus()
         val currentStatus: Status = when (storage.getScanMode()) {
-            ScanMode.Network,
-            ScanMode.Hybrid -> hasTargetWifi.toStatus()
+            ScanMode.Network -> hasTargetWifi.toStatus()
             ScanMode.Power -> lastStatus ?: Status.Online(LocalDateTime.now())
         }
         subscribers.forEach { it.onScanComplete() }
@@ -116,7 +115,7 @@ class Scanner(private val context: Context) {
         }
         retryCount = 0
         if (lastStatus?.state != currentStatus.state) {
-            if (storage.getScanMode() == ScanMode.Hybrid && currentStatus is Status.Online && lastStatus is Status.Offline) {
+            if (storage.getScanMode() == ScanMode.Network && currentStatus is Status.Online && lastStatus is Status.Offline) {
                 // Only stop WiFi scanning if phone is actually charging
                 Log.d("Scanner", "Offline->Online transition, hasPower=${hasPower()}")
                 if (hasPower()) {
@@ -172,8 +171,7 @@ class Scanner(private val context: Context) {
         isScanning = true
         acquireWifiLock()
         when (storage.getScanMode()) {
-            ScanMode.Network -> startNetworkScanning()
-            ScanMode.Hybrid -> {
+            ScanMode.Network -> {
                 if (storage.getLastStatus() is Status.Offline) {
                     startNetworkScanning()
                 } else if (storage.getLastStatus() is Status.Online && !hasPower()) {
@@ -229,7 +227,16 @@ class Scanner(private val context: Context) {
             val lastStatus = storage.getLastStatus()
             when (storage.getScanMode()) {
                 ScanMode.Network -> {
-                    if (!hasPower || singleScan) {
+                    if (lastStatus is Status.Online && hasPower.toStatus() is Status.Offline) {
+                        val currentStatus = hasPower.toStatus()
+                        if (currentStatus is Status.Offline) {
+                            verifyPowerState(lastStatus, !singleScan)
+                        }
+                    } else if (hasPower && lastStatus is Status.Online && job != null) {
+                        // Power connected while Online - stop WiFi scanning and webhook timer
+                        stopNetworkScanning()
+                        stopWebhookTimer()
+                    } else if (singleScan) {
                         scanOnce()
                     }
                 }
@@ -243,20 +250,6 @@ class Scanner(private val context: Context) {
                         subscribers.forEach {
                             it.onStateChanged(currentStatus, lastStatus?.since)
                         }
-                    }
-                }
-                ScanMode.Hybrid -> {
-                    if (lastStatus is Status.Online && hasPower.toStatus() is Status.Offline) {
-                        val currentStatus = hasPower.toStatus()
-                        if (currentStatus is Status.Offline) {
-                            verifyPowerState(lastStatus, !singleScan)
-                        }
-                    } else if (hasPower && lastStatus is Status.Online && job != null) {
-                        // Power connected while Online - stop WiFi scanning and webhook timer
-                        stopNetworkScanning()
-                        stopWebhookTimer()
-                    } else if (singleScan) {
-                        scanOnce()
                     }
                 }
             }
@@ -274,14 +267,14 @@ class Scanner(private val context: Context) {
                     if (startNetworkScanning) {
                         startNetworkScanning()
                     }
-                    // Start webhook timer in Hybrid mode (will be stopped if status goes Offline)
-                    if (storage.getScanMode() == ScanMode.Hybrid) {
+                    // Start webhook timer in Network mode (will be stopped if status goes Offline)
+                    if (storage.getScanMode() == ScanMode.Network) {
                         startWebhookTimer()
                     }
                     // Perform a WiFi scan to verify - scanSuccess() will handle state transition
                     scanOnce()
                 }
-            } else if (storage.getScanMode() == ScanMode.Hybrid &&
+            } else if (storage.getScanMode() == ScanMode.Network &&
                        lastStatus is Status.Online &&
                        !hasPower()) {
                 withContext(Dispatchers.Main) {
@@ -392,8 +385,8 @@ class Scanner(private val context: Context) {
         webhookJob = tickerFlow(3.minutes)
             .onEach {
                 Log.d("Scanner", "Webhook tick: mode=${storage.getScanMode()}, status=${storage.getLastStatus()?.state}, hasPower=${hasPower()}")
-                // Only send if still in Hybrid mode, Online, and not charging
-                if (storage.getScanMode() == ScanMode.Hybrid &&
+                // Only send if still in Network mode, Online, and not charging
+                if (storage.getScanMode() == ScanMode.Network &&
                     storage.getLastStatus() is Status.Online &&
                     !hasPower()) {
                     try {

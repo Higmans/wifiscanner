@@ -2,8 +2,7 @@ package biz.lungo.wifiscanner.data
 
 enum class ScanMode {
     Network,
-    Power,
-    Hybrid;
+    Power;
 
     companion object {
         private val DEFAULT = Network
